@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+from typing import Any
+
+from app.database import delete_product, list_products, upsert_product
+
+
+def _normalize_keywords(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value).strip()
+    if not text:
+        return []
+    for sep in ("|", "，", ";", "；", "\n"):
+        text = text.replace(sep, ",")
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def normalize_product_payload(payload: dict) -> dict:
+    normalized = dict(payload)
+    normalized["keywords"] = _normalize_keywords(payload.get("keywords"))
+    normalized["commission_rate"] = float(payload.get("commission_rate") or 0)
+    normalized["is_active"] = bool(payload.get("is_active", True))
+    return normalized
+
+
+def save_product(payload: dict) -> dict:
+    return upsert_product(normalize_product_payload(payload))
+
+
+def remove_product(product_id: str) -> bool:
+    return delete_product(product_id)
+
+
+def list_product_rows(active_only: bool = False) -> list[dict]:
+    return list_products(active_only=active_only)

@@ -20,6 +20,7 @@ import logging
 import smtplib
 import ssl
 import html as html_lib
+from datetime import datetime
 from email import charset as _charset_mod
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -210,6 +211,62 @@ def send_reply(
     except Exception as e:
         logger.error(f"❌ SMTP 发送失败: {e}", exc_info=True)
         return False
+
+
+def send_outreach_email(
+    *,
+    to_email: str,
+    to_name: str,
+    subject: str,
+    body: str,
+) -> dict:
+    """
+    发送主动首封开发邮件。
+
+    返回:
+      {
+        "success": bool,
+        "message_id": str,
+        "thread_id": str,
+        "sent_at": str
+      }
+    """
+    message_id = make_msgid(domain=config.EMAIL_ADDRESS.split("@")[-1])
+    sent_at = datetime.now().isoformat()
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["From"] = formataddr((config.SENDER_DISPLAY_NAME, config.EMAIL_ADDRESS))
+        msg["To"] = formataddr((to_name or to_email, to_email))
+        msg["Subject"] = subject
+        msg["Date"] = formatdate(localtime=True)
+        msg["Message-ID"] = message_id
+
+        text_part = MIMEText(body, "plain", _UTF8_QP)
+        html_part = MIMEText(_text_to_html(body, config.SENDER_DISPLAY_NAME), "html", _UTF8_QP)
+        msg.attach(text_part)
+        msg.attach(html_part)
+
+        logger.info(f"📤 发送开发邮件 → {to_email} | 主题: {subject}")
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=context) as server:
+            server.login(config.EMAIL_ADDRESS, config.EMAIL_PASSWORD)
+            server.send_message(msg)
+
+        logger.info(f"✅ 开发邮件发送成功 → {to_email}")
+        return {
+            "success": True,
+            "message_id": message_id,
+            "thread_id": message_id,
+            "sent_at": sent_at,
+        }
+    except Exception as exc:
+        logger.error(f"❌ 开发邮件发送失败: {exc}", exc_info=True)
+        return {
+            "success": False,
+            "message_id": message_id,
+            "thread_id": message_id,
+            "sent_at": sent_at,
+        }
 
 
 # ─── HTML 生成辅助 ──────────────────────────────────────────────────────────────

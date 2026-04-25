@@ -1,16 +1,23 @@
 """
 database.py — SQLite 持久化层
 
-负责：
-  1. 记录已处理的邮件 Message-ID，防止重复回复（processed_messages）
-  2. 存储每个 KOL 会话（Thread）的合作阶段和元数据（kol_threads）
-  3. 存储每个 Thread 的完整多轮对话历史，供 LLM 上下文使用（thread_messages）
+在保留原有 thread/message 能力的基础上，补齐：
+  1. 达人主档（creators）
+  2. 产品库（products）
+  3. 外呼批次（campaigns）
+  4. 主动外呼记录（outreach_messages）
+  5. 意图识别结果（intent_results）
+  6. 合作线索（collaboration_leads）
 """
 
-import sqlite3
+from __future__ import annotations
+
+import json
 import logging
+import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from app.config import config
 
@@ -24,61 +31,296 @@ def _get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _now_iso() -> str:
+    return datetime.now().isoformat()
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value or [], ensure_ascii=False)
+
+
+def _json_loads(value: str | None) -> Any:
+    if not value:
+        return []
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return []
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    cols = {
+        row["name"]
+        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
+def _dicts(rows: list[sqlite3.Row]) -> list[dict]:
+    return [dict(row) for row in rows]
+
+
+def _row_to_product(row: sqlite3.Row | None) -> dict | None:
+    if not row:
+        return None
+    data = dict(row)
+    data["keywords"] = _json_loads(data.get("keywords"))
+    data["commission_rate"] = float(data.get("commission_rate") or 0)
+    data["is_active"] = bool(data.get("is_active", 1))
+    return data
+
+
+def _row_to_creator(row: sqlite3.Row | None) -> dict | None:
+    if not row:
+        return None
+    data = dict(row)
+    data["tags"] = _json_loads(data.get("tags"))
+    return data
+
+
+def _seed_products_if_needed(conn: sqlite3.Connection) -> None:
+    existing = conn.execute("SELECT COUNT(1) AS cnt FROM products").fetchone()
+    if existing and existing["cnt"]:
+        return
+
+    seed_path = Path(config.PRODUCTS_PATH)
+    if not seed_path.exists():
+        return
+
+    try:
+        items = json.loads(seed_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning(f"⚠️ 初始产品库导入失败: {exc}")
+        return
+
+    now = _now_iso()
+    for item in items:
+        product_id = item.get("id") or item.get("asin") or f"seed-{abs(hash(item.get('name', '')))}"
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO products (
+                id, name, description, keywords, store_name, asin,
+                commission_rate, tagline, scene, intro, is_active, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            """,
+            (
+                str(product_id),
+                item.get("name", ""),
+                item.get("description") or item.get("intro", ""),
+                _json_dumps(item.get("keywords", [])),
+                item.get("store_name", config.BRAND_NAME),
+                item.get("asin", ""),
+                float(item.get("commission_rate") or 0.0),
+                item.get("tagline", ""),
+                item.get("scene", ""),
+                item.get("intro", ""),
+                now,
+                now,
+            ),
+        )
+
+
 def init_db() -> None:
-    """初始化数据库，建表（幂等操作，可重复调用）"""
+    """初始化数据库，建表并补充轻量迁移。"""
     conn = _get_conn()
     cursor = conn.cursor()
 
-    # 已处理消息表：防止对同一封邮件重复触发回复
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS processed_messages (
-            message_id  TEXT PRIMARY KEY,
-            thread_id   TEXT NOT NULL,
+            message_id   TEXT PRIMARY KEY,
+            thread_id    TEXT NOT NULL,
             processed_at TEXT NOT NULL
         )
-    """)
+        """
+    )
 
-    # KOL 会话状态表：记录每个 Thread 的合作进展
-    cursor.execute("""
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS creators (
+            id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            email                TEXT NOT NULL UNIQUE,
+            name                 TEXT,
+            platform             TEXT,
+            profile_url          TEXT,
+            country              TEXT,
+            language             TEXT,
+            tags                 TEXT DEFAULT '[]',
+            identity_summary     TEXT,
+            notes                TEXT,
+            collaboration_status TEXT NOT NULL DEFAULT 'new',
+            last_outreach_at     TEXT,
+            created_at           TEXT NOT NULL,
+            updated_at           TEXT NOT NULL
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS products (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            description     TEXT,
+            keywords        TEXT NOT NULL DEFAULT '[]',
+            store_name      TEXT,
+            asin            TEXT,
+            commission_rate REAL NOT NULL DEFAULT 0,
+            tagline         TEXT,
+            scene           TEXT,
+            intro           TEXT,
+            is_active       INTEGER NOT NULL DEFAULT 1,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS campaigns (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL,
+            product_id      TEXT,
+            commission_rate REAL NOT NULL DEFAULT 0,
+            status          TEXT NOT NULL DEFAULT 'draft',
+            creator_count   INTEGER NOT NULL DEFAULT 0,
+            notes           TEXT,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        )
+        """
+    )
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS kol_threads (
             thread_id       TEXT PRIMARY KEY,
             kol_email       TEXT NOT NULL,
             kol_name        TEXT,
+            creator_id      INTEGER,
+            campaign_id     INTEGER,
+            product_id      TEXT,
             current_stage   INTEGER NOT NULL DEFAULT 1,
+            intent_label    TEXT,
             last_message_id TEXT,
             notes           TEXT,
             created_at      TEXT NOT NULL,
             updated_at      TEXT NOT NULL
         )
-    """)
+        """
+    )
 
-    # 多轮对话历史表：按 thread_id 存储每封邮件，供 LLM 上下文使用
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS thread_messages (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            thread_id  TEXT NOT NULL,
-            message_id TEXT NOT NULL,
-            role       TEXT NOT NULL CHECK(role IN ('kol', 'our')),
-            subject    TEXT,
-            body       TEXT,
-            created_at TEXT NOT NULL,
-            UNIQUE(message_id)
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            thread_id     TEXT NOT NULL,
+            message_id    TEXT NOT NULL UNIQUE,
+            role          TEXT NOT NULL CHECK(role IN ('kol', 'our')),
+            creator_id    INTEGER,
+            campaign_id   INTEGER,
+            outreach_id   INTEGER,
+            subject       TEXT,
+            body          TEXT,
+            created_at    TEXT NOT NULL
         )
-    """)
-    cursor.execute("""
+        """
+    )
+    cursor.execute(
+        """
         CREATE INDEX IF NOT EXISTS idx_thread_messages_thread_id
         ON thread_messages (thread_id, created_at)
-    """)
+        """
+    )
 
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS outreach_messages (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            creator_id         INTEGER NOT NULL,
+            campaign_id        INTEGER,
+            product_id         TEXT,
+            thread_id          TEXT NOT NULL,
+            message_id         TEXT UNIQUE,
+            subject            TEXT NOT NULL,
+            body               TEXT NOT NULL,
+            status             TEXT NOT NULL DEFAULT 'draft',
+            direction          TEXT NOT NULL DEFAULT 'outbound',
+            reply_to_message_id TEXT,
+            sent_at            TEXT,
+            created_at         TEXT NOT NULL,
+            updated_at         TEXT NOT NULL
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS intent_results (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            thread_id       TEXT NOT NULL,
+            creator_id      INTEGER,
+            campaign_id     INTEGER,
+            product_id      TEXT,
+            message_id      TEXT,
+            intent          TEXT NOT NULL,
+            confidence      REAL NOT NULL DEFAULT 0,
+            summary         TEXT,
+            suggested_reply TEXT,
+            raw_json        TEXT,
+            created_at      TEXT NOT NULL
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tickets (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            creator_id       INTEGER NOT NULL,
+            campaign_id      INTEGER,
+            product_id       TEXT,
+            thread_id        TEXT,
+            status           TEXT NOT NULL DEFAULT 'pending',
+            commission_rate  REAL NOT NULL DEFAULT 0,
+            intent           TEXT,
+            intent_summary   TEXT,
+            latest_message   TEXT,
+            notes            TEXT,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL,
+            UNIQUE(creator_id, campaign_id, product_id)
+        )
+        """
+    )
+    # migrate old table name if it still exists
+    old_tables = {
+        row[0]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+    if "collaboration_leads" in old_tables and "tickets" not in old_tables:
+        conn.execute("ALTER TABLE collaboration_leads RENAME TO tickets")
+
+    _ensure_column(conn, "kol_threads", "creator_id", "INTEGER")
+    _ensure_column(conn, "kol_threads", "campaign_id", "INTEGER")
+    _ensure_column(conn, "kol_threads", "product_id", "TEXT")
+    _ensure_column(conn, "kol_threads", "intent_label", "TEXT")
+    _ensure_column(conn, "thread_messages", "creator_id", "INTEGER")
+    _ensure_column(conn, "thread_messages", "campaign_id", "INTEGER")
+    _ensure_column(conn, "thread_messages", "outreach_id", "INTEGER")
+
+    _seed_products_if_needed(conn)
     conn.commit()
     conn.close()
     logger.info("✅ 数据库初始化完成")
 
 
-# ─── processed_messages 操作 ──────────────────────────────────────────────────
+# ─── processed_messages ───────────────────────────────────────────────────────
 
 def is_message_processed(message_id: str) -> bool:
-    """检查某条邮件消息是否已被处理过"""
     conn = _get_conn()
     row = conn.execute(
         "SELECT 1 FROM processed_messages WHERE message_id = ?", (message_id,)
@@ -88,49 +330,565 @@ def is_message_processed(message_id: str) -> bool:
 
 
 def mark_message_processed(message_id: str, thread_id: str) -> None:
-    """将消息标记为已处理"""
     conn = _get_conn()
     conn.execute(
-        "INSERT OR IGNORE INTO processed_messages (message_id, thread_id, processed_at) VALUES (?, ?, ?)",
-        (message_id, thread_id, datetime.now().isoformat())
+        """
+        INSERT OR IGNORE INTO processed_messages (message_id, thread_id, processed_at)
+        VALUES (?, ?, ?)
+        """,
+        (message_id, thread_id, _now_iso()),
     )
     conn.commit()
     conn.close()
 
 
 def list_processed_messages(limit: int = 100) -> list[dict]:
-    """
-    列出最近处理的消息记录，关联 kol_threads 展示发件人信息。
-    用于仪表盘「处理流水」视图。
-    """
     conn = _get_conn()
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT
             pm.message_id,
             pm.thread_id,
             pm.processed_at,
             kt.kol_email,
             kt.kol_name,
+            kt.intent_label,
             tm.subject,
-            SUBSTR(tm.body, 1, 120) AS body_excerpt
+            SUBSTR(tm.body, 1, 160) AS body_excerpt
         FROM processed_messages pm
         LEFT JOIN kol_threads kt ON pm.thread_id = kt.thread_id
         LEFT JOIN thread_messages tm
             ON pm.message_id = tm.message_id AND tm.role = 'kol'
         ORDER BY pm.processed_at DESC
         LIMIT ?
-    """, (limit,)).fetchall()
+        """,
+        (limit,),
+    ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return _dicts(rows)
 
 
-# ─── kol_threads 操作 ─────────────────────────────────────────────────────────
+# ─── creators ─────────────────────────────────────────────────────────────────
 
-def get_thread_state(thread_id: str) -> dict | None:
-    """获取指定 Thread 的 KOL 会话状态，不存在则返回 None"""
+def list_creators() -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM creators ORDER BY updated_at DESC, id DESC"
+    ).fetchall()
+    conn.close()
+    return [_row_to_creator(row) for row in rows if row]
+
+
+def get_creator(creator_id: int) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM creators WHERE id = ?", (creator_id,)).fetchone()
+    conn.close()
+    return _row_to_creator(row)
+
+
+def get_creator_by_email(email: str) -> dict | None:
     conn = _get_conn()
     row = conn.execute(
-        "SELECT * FROM kol_threads WHERE thread_id = ?", (thread_id,)
+        "SELECT * FROM creators WHERE lower(email) = lower(?)",
+        (email.strip(),),
+    ).fetchone()
+    conn.close()
+    return _row_to_creator(row)
+
+
+def upsert_creator(data: dict) -> dict:
+    now = _now_iso()
+    email = (data.get("email") or "").strip()
+    if not email:
+        raise ValueError("达人邮箱不能为空")
+
+    payload = {
+        "email": email,
+        "name": (data.get("name") or "").strip(),
+        "platform": (data.get("platform") or "").strip(),
+        "profile_url": (data.get("profile_url") or "").strip(),
+        "country": (data.get("country") or "").strip(),
+        "language": (data.get("language") or "").strip(),
+        "tags": _json_dumps(data.get("tags") or []),
+        "identity_summary": (data.get("identity_summary") or "").strip(),
+        "notes": (data.get("notes") or "").strip(),
+        "collaboration_status": (data.get("collaboration_status") or "new").strip(),
+    }
+
+    conn = _get_conn()
+    conn.execute(
+        """
+        INSERT INTO creators (
+            email, name, platform, profile_url, country, language, tags,
+            identity_summary, notes, collaboration_status, created_at, updated_at
+        )
+        VALUES (:email, :name, :platform, :profile_url, :country, :language, :tags,
+                :identity_summary, :notes, :collaboration_status, :created_at, :updated_at)
+        ON CONFLICT(email) DO UPDATE SET
+            name = excluded.name,
+            platform = excluded.platform,
+            profile_url = excluded.profile_url,
+            country = excluded.country,
+            language = excluded.language,
+            tags = excluded.tags,
+            identity_summary = excluded.identity_summary,
+            notes = excluded.notes,
+            collaboration_status = excluded.collaboration_status,
+            updated_at = excluded.updated_at
+        """,
+        payload | {"created_at": now, "updated_at": now},
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT * FROM creators WHERE lower(email) = lower(?)",
+        (email,),
+    ).fetchone()
+    conn.close()
+    return _row_to_creator(row) or {}
+
+
+def update_creator(creator_id: int, data: dict) -> dict | None:
+    current = get_creator(creator_id)
+    if not current:
+        return None
+    merged = current | data
+    merged["tags"] = data.get("tags", current.get("tags", []))
+    merged["email"] = (merged.get("email") or current["email"]).strip()
+    updated = upsert_creator(merged)
+    if data.get("last_outreach_at"):
+        conn = _get_conn()
+        conn.execute(
+            "UPDATE creators SET last_outreach_at = ?, updated_at = ? WHERE id = ?",
+            (data["last_outreach_at"], _now_iso(), creator_id),
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM creators WHERE id = ?", (creator_id,)).fetchone()
+        conn.close()
+        return _row_to_creator(row)
+    return updated
+
+
+def bulk_upsert_creators(items: list[dict]) -> dict:
+    created = 0
+    updated = 0
+    errors: list[dict] = []
+    for idx, item in enumerate(items, start=1):
+        try:
+            before = get_creator_by_email(item.get("email", ""))
+            upsert_creator(item)
+            if before:
+                updated += 1
+            else:
+                created += 1
+        except Exception as exc:
+            errors.append({"row": idx, "email": item.get("email", ""), "error": str(exc)})
+    return {"created": created, "updated": updated, "errors": errors}
+
+
+# ─── products ─────────────────────────────────────────────────────────────────
+
+def list_products(active_only: bool = False) -> list[dict]:
+    conn = _get_conn()
+    sql = "SELECT * FROM products"
+    params: tuple[Any, ...] = ()
+    if active_only:
+        sql += " WHERE is_active = ?"
+        params = (1,)
+    sql += " ORDER BY updated_at DESC, id DESC"
+    rows = conn.execute(sql, params).fetchall()
+    conn.close()
+    return [_row_to_product(row) for row in rows if row]
+
+
+def get_product(product_id: str) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+    conn.close()
+    return _row_to_product(row)
+
+
+def upsert_product(data: dict) -> dict:
+    now = _now_iso()
+    product_id = str(data.get("id") or data.get("asin") or "").strip()
+    if not product_id:
+        raise ValueError("产品 ID 不能为空")
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise ValueError("产品名称不能为空")
+
+    payload = {
+        "id": product_id,
+        "name": name,
+        "description": (data.get("description") or "").strip(),
+        "keywords": _json_dumps(data.get("keywords") or []),
+        "store_name": (data.get("store_name") or config.BRAND_NAME).strip(),
+        "asin": (data.get("asin") or "").strip(),
+        "commission_rate": float(data.get("commission_rate") or 0),
+        "tagline": (data.get("tagline") or "").strip(),
+        "scene": (data.get("scene") or "").strip(),
+        "intro": (data.get("intro") or "").strip(),
+        "is_active": 1 if data.get("is_active", True) else 0,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    conn = _get_conn()
+    conn.execute(
+        """
+        INSERT INTO products (
+            id, name, description, keywords, store_name, asin,
+            commission_rate, tagline, scene, intro, is_active, created_at, updated_at
+        )
+        VALUES (
+            :id, :name, :description, :keywords, :store_name, :asin,
+            :commission_rate, :tagline, :scene, :intro, :is_active, :created_at, :updated_at
+        )
+        ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            description = excluded.description,
+            keywords = excluded.keywords,
+            store_name = excluded.store_name,
+            asin = excluded.asin,
+            commission_rate = excluded.commission_rate,
+            tagline = excluded.tagline,
+            scene = excluded.scene,
+            intro = excluded.intro,
+            is_active = excluded.is_active,
+            updated_at = excluded.updated_at
+        """,
+        payload,
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+    conn.close()
+    return _row_to_product(row) or {}
+
+
+def delete_product(product_id: str) -> bool:
+    conn = _get_conn()
+    deleted = conn.execute("DELETE FROM products WHERE id = ?", (product_id,)).rowcount
+    conn.commit()
+    conn.close()
+    return bool(deleted)
+
+
+# ─── campaigns / outreach ─────────────────────────────────────────────────────
+
+def create_campaign(name: str, product_id: str, commission_rate: float, notes: str = "") -> dict:
+    now = _now_iso()
+    conn = _get_conn()
+    cursor = conn.execute(
+        """
+        INSERT INTO campaigns (name, product_id, commission_rate, notes, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (name.strip(), product_id, float(commission_rate or 0), notes.strip(), now, now),
+    )
+    campaign_id = cursor.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+
+def list_campaigns() -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute("SELECT * FROM campaigns ORDER BY updated_at DESC, id DESC").fetchall()
+    conn.close()
+    return _dicts(rows)
+
+
+def get_campaign(campaign_id: int) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_campaign(campaign_id: int, **fields: Any) -> dict | None:
+    current = get_campaign(campaign_id)
+    if not current:
+        return None
+    allowed = {"name", "product_id", "commission_rate", "status", "creator_count", "notes"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return current
+    updates["updated_at"] = _now_iso()
+    set_clause = ", ".join(f"{k} = :{k}" for k in updates)
+    conn = _get_conn()
+    conn.execute(
+        f"UPDATE campaigns SET {set_clause} WHERE id = :campaign_id",
+        updates | {"campaign_id": campaign_id},
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_outreach_message(data: dict) -> dict:
+    now = _now_iso()
+    conn = _get_conn()
+    cursor = conn.execute(
+        """
+        INSERT INTO outreach_messages (
+            creator_id, campaign_id, product_id, thread_id, message_id, subject, body,
+            status, direction, reply_to_message_id, sent_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            data["creator_id"],
+            data.get("campaign_id"),
+            data.get("product_id"),
+            data["thread_id"],
+            data.get("message_id"),
+            data.get("subject", ""),
+            data.get("body", ""),
+            data.get("status", "draft"),
+            data.get("direction", "outbound"),
+            data.get("reply_to_message_id"),
+            data.get("sent_at"),
+            now,
+            now,
+        ),
+    )
+    msg_id = cursor.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM outreach_messages WHERE id = ?", (msg_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+
+def update_outreach_message(outreach_id: int, **fields: Any) -> dict | None:
+    allowed = {
+        "subject",
+        "body",
+        "status",
+        "message_id",
+        "sent_at",
+        "reply_to_message_id",
+        "thread_id",
+        "campaign_id",
+        "product_id",
+    }
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return get_outreach_message(outreach_id)
+    updates["updated_at"] = _now_iso()
+    set_clause = ", ".join(f"{k} = :{k}" for k in updates)
+    conn = _get_conn()
+    conn.execute(
+        f"UPDATE outreach_messages SET {set_clause} WHERE id = :mid",
+        updates | {"mid": outreach_id},
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM outreach_messages WHERE id = ?", (outreach_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_outreach_message(message_id: int) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM outreach_messages WHERE id = ?", (message_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_outreach_message_by_rfc_message_id(rfc_message_id: str) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM outreach_messages WHERE message_id = ?",
+        (rfc_message_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_outreach_message_by_thread_id(thread_id: str) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute(
+        """
+        SELECT * FROM outreach_messages
+        WHERE thread_id = ?
+        ORDER BY created_at ASC
+        LIMIT 1
+        """,
+        (thread_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_outreach_messages(campaign_id: int | None = None) -> list[dict]:
+    conn = _get_conn()
+    if campaign_id is None:
+        rows = conn.execute(
+            "SELECT * FROM outreach_messages ORDER BY updated_at DESC, id DESC"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT * FROM outreach_messages
+            WHERE campaign_id = ?
+            ORDER BY updated_at DESC, id DESC
+            """,
+            (campaign_id,),
+        ).fetchall()
+    conn.close()
+    return _dicts(rows)
+
+
+# ─── intents / leads ──────────────────────────────────────────────────────────
+
+def create_intent_result(data: dict) -> dict:
+    now = _now_iso()
+    conn = _get_conn()
+    cursor = conn.execute(
+        """
+        INSERT INTO intent_results (
+            thread_id, creator_id, campaign_id, product_id, message_id,
+            intent, confidence, summary, suggested_reply, raw_json, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            data.get("thread_id", ""),
+            data.get("creator_id"),
+            data.get("campaign_id"),
+            data.get("product_id"),
+            data.get("message_id"),
+            data.get("intent", "manual_review"),
+            float(data.get("confidence") or 0),
+            data.get("summary", ""),
+            data.get("suggested_reply", ""),
+            data.get("raw_json", ""),
+            now,
+        ),
+    )
+    rid = cursor.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM intent_results WHERE id = ?", (rid,)).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+
+def list_intent_results(limit: int = 100) -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        """
+        SELECT ir.*, c.email AS creator_email, c.name AS creator_name
+        FROM intent_results ir
+        LEFT JOIN creators c ON ir.creator_id = c.id
+        ORDER BY ir.created_at DESC, ir.id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return _dicts(rows)
+
+
+def upsert_collaboration_lead(data: dict) -> dict:
+    now = _now_iso()
+    conn = _get_conn()
+    conn.execute(
+        """
+        INSERT INTO tickets (
+            creator_id, campaign_id, product_id, thread_id, status,
+            commission_rate, intent, intent_summary, latest_message, notes, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(creator_id, campaign_id, product_id) DO UPDATE SET
+            thread_id = excluded.thread_id,
+            status = CASE WHEN tickets.status IN ('in_progress','done') THEN tickets.status ELSE excluded.status END,
+            commission_rate = excluded.commission_rate,
+            intent = excluded.intent,
+            intent_summary = excluded.intent_summary,
+            latest_message = excluded.latest_message,
+            notes = excluded.notes,
+            updated_at = excluded.updated_at
+        """,
+        (
+            data["creator_id"],
+            data.get("campaign_id"),
+            data.get("product_id"),
+            data.get("thread_id"),
+            data.get("status", "new"),
+            float(data.get("commission_rate") or 0),
+            data.get("intent", "interested"),
+            data.get("intent_summary", data.get("notes", "")),
+            data.get("latest_message", ""),
+            data.get("notes", ""),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    row = conn.execute(
+        """
+        SELECT * FROM tickets
+        WHERE creator_id = ? AND campaign_id IS ? AND product_id IS ?
+        """,
+        (data["creator_id"], data.get("campaign_id"), data.get("product_id")),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+
+def update_ticket_status(ticket_id: int, status: str) -> dict | None:
+    allowed = {"new", "in_progress", "done"}
+    if status not in allowed:
+        return None
+    now = _now_iso()
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE tickets SET status = ?, updated_at = ? WHERE id = ?",
+        (status, now, ticket_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_collaboration_leads() -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        """
+        SELECT
+            cl.*,
+            c.email AS creator_email,
+            c.name AS creator_name,
+            c.platform,
+            p.name AS product_name,
+            p.asin,
+            cam.name AS campaign_name
+        FROM tickets cl
+        LEFT JOIN creators c ON cl.creator_id = c.id
+        LEFT JOIN products p ON cl.product_id = p.id
+        LEFT JOIN campaigns cam ON cl.campaign_id = cam.id
+        ORDER BY cl.updated_at DESC, cl.id DESC
+        """
+    ).fetchall()
+    conn.close()
+    return _dicts(rows)
+
+
+def count_pending_tickets() -> int:
+    conn = _get_conn()
+    row = conn.execute("SELECT COUNT(1) AS cnt FROM tickets WHERE status = 'new'").fetchone()
+    conn.close()
+    return row["cnt"] if row else 0
+
+
+# ─── thread / message history ─────────────────────────────────────────────────
+
+def get_thread_state(thread_id: str) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM kol_threads WHERE thread_id = ?",
+        (thread_id,),
     ).fetchone()
     conn.close()
     return dict(row) if row else None
@@ -142,66 +900,60 @@ def upsert_thread_state(
     kol_name: str,
     stage: int,
     last_message_id: str,
-    notes: str = ""
+    notes: str = "",
+    creator_id: int | None = None,
+    campaign_id: int | None = None,
+    product_id: str | None = None,
+    intent_label: str | None = None,
 ) -> None:
-    """
-    创建或更新 KOL 会话状态（UPSERT）。
-    首次插入时记录 created_at；更新时只修改可变字段。
-    """
     conn = _get_conn()
-    now = datetime.now().isoformat()
-    conn.execute("""
-        INSERT INTO kol_threads
-            (thread_id, kol_email, kol_name, current_stage, last_message_id, notes, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    now = _now_iso()
+    conn.execute(
+        """
+        INSERT INTO kol_threads (
+            thread_id, kol_email, kol_name, creator_id, campaign_id, product_id,
+            current_stage, intent_label, last_message_id, notes, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(thread_id) DO UPDATE SET
-            kol_name        = excluded.kol_name,
-            current_stage   = excluded.current_stage,
+            kol_email = excluded.kol_email,
+            kol_name = excluded.kol_name,
+            creator_id = COALESCE(excluded.creator_id, kol_threads.creator_id),
+            campaign_id = COALESCE(excluded.campaign_id, kol_threads.campaign_id),
+            product_id = COALESCE(excluded.product_id, kol_threads.product_id),
+            current_stage = excluded.current_stage,
+            intent_label = COALESCE(excluded.intent_label, kol_threads.intent_label),
             last_message_id = excluded.last_message_id,
-            notes           = excluded.notes,
-            updated_at      = excluded.updated_at
-    """, (thread_id, kol_email, kol_name, stage, last_message_id, notes, now, now))
+            notes = excluded.notes,
+            updated_at = excluded.updated_at
+        """,
+        (
+            thread_id,
+            kol_email,
+            kol_name,
+            creator_id,
+            campaign_id,
+            product_id,
+            stage,
+            intent_label,
+            last_message_id,
+            notes,
+            now,
+            now,
+        ),
+    )
     conn.commit()
     conn.close()
 
 
 def list_all_threads() -> list[dict]:
-    """列出所有 KOL 会话（用于 Dashboard 展示）"""
     conn = _get_conn()
     rows = conn.execute(
         "SELECT * FROM kol_threads ORDER BY updated_at DESC"
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return _dicts(rows)
 
-
-def delete_thread(thread_id: str) -> int:
-    """
-    删除指定 Thread 的全部数据（三张表联动）。
-    返回受影响的总行数。
-    """
-    conn = _get_conn()
-    deleted = 0
-    deleted += conn.execute("DELETE FROM thread_messages   WHERE thread_id = ?", (thread_id,)).rowcount
-    deleted += conn.execute("DELETE FROM processed_messages WHERE thread_id = ?", (thread_id,)).rowcount
-    deleted += conn.execute("DELETE FROM kol_threads        WHERE thread_id = ?", (thread_id,)).rowcount
-    conn.commit()
-    conn.close()
-    return deleted
-
-
-def delete_all_data() -> dict:
-    """清空全部数据（三张表），用于测试重置。返回各表删除行数。"""
-    conn = _get_conn()
-    tm  = conn.execute("DELETE FROM thread_messages").rowcount
-    pm  = conn.execute("DELETE FROM processed_messages").rowcount
-    kt  = conn.execute("DELETE FROM kol_threads").rowcount
-    conn.commit()
-    conn.close()
-    return {"thread_messages": tm, "processed_messages": pm, "kol_threads": kt}
-
-
-# ─── thread_messages 操作 ─────────────────────────────────────────────────────
 
 def save_thread_message(
     thread_id: str,
@@ -210,50 +962,86 @@ def save_thread_message(
     subject: str,
     body: str,
     created_at: str | None = None,
+    creator_id: int | None = None,
+    campaign_id: int | None = None,
+    outreach_id: int | None = None,
 ) -> None:
-    """
-    将单封邮件写入多轮对话历史表。
-
-    - role 只能为 'kol'（KOL 来信）或 'our'（我方发出的回复）
-    - UNIQUE(message_id) 保证同一封邮件不会重复写入
-    - body 入库前应已截断，避免无限增长
-
-    写入时机：
-      - KOL 来信：在调用 LLM 之前写入（role=kol）
-      - 我方回复：仅在 send_reply 成功后写入（role=our）
-    """
     if role not in ("kol", "our"):
         raise ValueError(f"role 必须为 'kol' 或 'our'，实际为: {role!r}")
 
-    ts = created_at or datetime.now().isoformat()
+    ts = created_at or _now_iso()
     conn = _get_conn()
     conn.execute(
-        """INSERT OR IGNORE INTO thread_messages
-               (thread_id, message_id, role, subject, body, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (thread_id, message_id, role, subject or "", body or "", ts)
+        """
+        INSERT OR IGNORE INTO thread_messages
+            (thread_id, message_id, role, creator_id, campaign_id, outreach_id, subject, body, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            thread_id,
+            message_id,
+            role,
+            creator_id,
+            campaign_id,
+            outreach_id,
+            subject or "",
+            body or "",
+            ts,
+        ),
     )
     conn.commit()
     conn.close()
 
 
 def get_thread_messages(thread_id: str, limit: int | None = None) -> list[dict]:
-    """
-    按时间从旧到新读取指定 Thread 的对话历史，最多返回 limit 条。
-
-    实现「取最近 N 条，然后按时间正序排列」，确保 LLM 看到连贯历史。
-    """
     effective_limit = limit or config.MAX_THREAD_MESSAGES
     conn = _get_conn()
-    rows = conn.execute("""
+    rows = conn.execute(
+        """
         SELECT * FROM (
-            SELECT thread_id, message_id, role, subject, body, created_at
+            SELECT thread_id, message_id, role, creator_id, campaign_id, outreach_id, subject, body, created_at
             FROM thread_messages
             WHERE thread_id = ?
             ORDER BY created_at DESC
             LIMIT ?
         )
         ORDER BY created_at ASC
-    """, (thread_id, effective_limit)).fetchall()
+        """,
+        (thread_id, effective_limit),
+    ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return _dicts(rows)
+
+
+def delete_thread(thread_id: str) -> int:
+    conn = _get_conn()
+    deleted = 0
+    deleted += conn.execute("DELETE FROM thread_messages WHERE thread_id = ?", (thread_id,)).rowcount
+    deleted += conn.execute("DELETE FROM processed_messages WHERE thread_id = ?", (thread_id,)).rowcount
+    deleted += conn.execute("DELETE FROM kol_threads WHERE thread_id = ?", (thread_id,)).rowcount
+    deleted += conn.execute("DELETE FROM outreach_messages WHERE thread_id = ?", (thread_id,)).rowcount
+    deleted += conn.execute("DELETE FROM intent_results WHERE thread_id = ?", (thread_id,)).rowcount
+    deleted += conn.execute("DELETE FROM tickets WHERE thread_id = ?", (thread_id,)).rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+
+def delete_all_data() -> dict:
+    conn = _get_conn()
+    result = {
+        "thread_messages": conn.execute("DELETE FROM thread_messages").rowcount,
+        "processed_messages": conn.execute("DELETE FROM processed_messages").rowcount,
+        "kol_threads": conn.execute("DELETE FROM kol_threads").rowcount,
+        "outreach_messages": conn.execute("DELETE FROM outreach_messages").rowcount,
+        "intent_results": conn.execute("DELETE FROM intent_results").rowcount,
+        "tickets": conn.execute("DELETE FROM tickets").rowcount,
+        "campaigns": conn.execute("DELETE FROM campaigns").rowcount,
+        "creators": conn.execute("DELETE FROM creators").rowcount,
+        "products": conn.execute("DELETE FROM products").rowcount,
+    }
+    conn.commit()
+    _seed_products_if_needed(conn)
+    conn.commit()
+    conn.close()
+    return result

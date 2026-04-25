@@ -87,11 +87,9 @@ def detect_stage(thread_history: list[dict], db_stage: int) -> dict:
 
 阶段定义：
 - 阶段1 [破冰邀请]：我方刚发出初次邀请，或 KOL 尚未回复
-- 阶段2 [规则确认]：KOL 表达了兴趣，正在了解/确认合作细节（购买体验→评价→报销）
-- 阶段3 [跟进评价]：KOL 已确认合作意向且可能已收货，需跟进引导留下真实评价
-- 阶段4 [返款确认]：KOL 已提供评价截图或链接，准备确认打款并致谢
+- 阶段2 [规则确认]：KOL 表达了兴趣，正在了解/确认合作细节，或已确认合作意向
 
-请只返回 JSON，格式：{"stage": <1|2|3|4>, "reasoning": "<简短中文判断理由>"}"""
+请只返回 JSON，格式：{"stage": <1|2>, "reasoning": "<简短中文判断理由>"}"""
 
     user_msg = f"数据库记录阶段：{db_stage}\n\n邮件历史（从旧到新）：\n\n{history_text}"
 
@@ -105,11 +103,12 @@ def detect_stage(thread_history: list[dict], db_stage: int) -> dict:
         # 清洗可能的 Markdown 代码块包裹
         clean = raw.strip().lstrip("```json").lstrip("```").rstrip("```").strip()
         result = json.loads(clean)
-        stage = max(1, min(4, int(result.get("stage", db_stage))))
+        stage = max(1, min(2, int(result.get("stage", db_stage))))
         return {"stage": stage, "reasoning": result.get("reasoning", "")}
     except Exception as e:
         logger.warning(f"⚠️ 阶段判断失败，沿用数据库阶段 {db_stage}: {e}")
-        return {"stage": db_stage, "reasoning": "自动判断失败，使用上次记录"}
+        clamped = max(1, min(2, db_stage))
+        return {"stage": clamped, "reasoning": "自动判断失败，使用上次记录"}
 
 
 # ─── KOL 回复生成 ──────────────────────────────────────────────────────────────
@@ -128,40 +127,13 @@ _STAGE_TASKS = {
 """,
     2: """
 【当前任务：规则确认】
-目标：向已表现出兴趣的 KOL 委婉、清晰地介绍合作流程，让对方感受到这是一个轻松、双赢的体验机会。
-
-合作流程描述方式（请用以下优雅措辞，绝不用粗暴直白的表达）：
-  步骤1: 请对方以真实用户身份在平台下单购买（强调：这样体验才最真实、最有参考价值）
-  步骤2: 收到产品后，按照真实感受在平台写下诚实的体验分享
-  步骤3: 我们会将购买费用作为"体验报销"（Reimbursement）全额退还
-
-绝对禁止的词汇：刷单、刷评、买好评、fake review、paid review
-推荐使用的词汇：产品测评(Product Evaluation)、体验报销(Reimbursement)、真诚分享(Honest Sharing)、真实体验(Genuine Experience)
-
-- 强调我们最珍视真实的用户声音，对方可以完全按真实感受评价
-- 询问对方是否方便，并请对方确认感兴趣的产品
-""",
-    3: """
-【当前任务：跟进评价】
-目标：极度关心 KOL 的产品体验，用最温柔、不强迫的方式引导其在方便时留下真实评价。
+目标：向已表现出兴趣的 KOL 清晰介绍合作方式，说明我方会提供免费产品寄送，由人工团队进一步对接合作细节。
 
 要点：
-- 首先亲切询问产品是否顺利到达、使用体验如何
-- 表达"我们非常期待您的真实感受，无论如何评价我们都真心接受"
-- 轻描淡写地提一句，"如果体验满意，许多粉丝很期待看到您的分享"
-- 如有任何不满意，承诺立刻处理（更换/退款）——体现极致服务
-- 语气像极其贴心的朋友，而非商业催单
-""",
-    4: """
-【当前任务：返款确认】
-目标：确认收到评价，安排报销，表达最诚挚的感谢，并展望长期合作关系。
-
-要点：
-- 热情表达已看到对方精彩的评价，大力称赞其质量（真实、专业、对消费者有参考价值）
-- 告知报销流程：请对方提供收款信息（PayPal 账户/银行信息等），X 个工作日内完成转账
-- 表达"这次合作愉快极了，希望我们成为长期合作伙伴"
-- 告知后续有新品会第一时间想到对方
-- 用极度感激、温暖的语气收尾，让 KOL 感受到被真心珍视
+- 感谢对方回信并表达合作期待
+- 告知我们会安排免费产品寄送，后续由我方团队与其直接沟通合作细节
+- 语气像普通商务往来邮件，简洁真诚，不堆叠溢美之词
+- 请对方确认地址或最方便的联系方式，方便后续跟进
 """,
 }
 
@@ -202,7 +174,7 @@ def generate_kol_reply(
         history_lines.append(f"[{role}]: {body_snippet}")
     history_text = "\n\n---\n\n".join(history_lines) or "（首次联系，无历史记录）"
 
-    stage_task = _STAGE_TASKS.get(stage, _STAGE_TASKS[2])
+    stage_task = _STAGE_TASKS.get(max(1, min(2, stage)), _STAGE_TASKS[2])
 
     # 构建产品参考区块（仅在有候选产品时注入）
     product_section = ""
@@ -279,3 +251,292 @@ def generate_kol_reply(
         temperature=0.72,
         max_tokens=900
     )
+
+
+def _clean_json_block(raw: str) -> str:
+    text = (raw or "").strip()
+    if text.startswith("```json"):
+        text = text[len("```json"):].strip()
+    elif text.startswith("```"):
+        text = text[len("```"):].strip()
+    if text.endswith("```"):
+        text = text[:-3].strip()
+    return text
+
+
+def _keyword_score(text: str, product: dict) -> int:
+    needle = (text or "").lower()
+    score = 0
+    for kw in product.get("keywords", []) or []:
+        candidate = str(kw).strip().lower()
+        if candidate and candidate in needle:
+            score += 1
+    return score
+
+
+def recommend_products_for_creator(
+    creator: dict,
+    products: list[dict],
+    top_n: int = 3,
+) -> list[dict]:
+    """
+    根据达人画像做轻量产品推荐。
+    首期优先用可解释的关键词匹配，避免把推荐完全交给黑盒。
+    """
+    if not products:
+        return []
+
+    profile_text = "\n".join([
+        creator.get("name", ""),
+        creator.get("platform", ""),
+        creator.get("country", ""),
+        creator.get("language", ""),
+        " ".join(creator.get("tags", []) or []),
+        creator.get("identity_summary", ""),
+        creator.get("notes", ""),
+    ])
+    scored = sorted(
+        ((product, _keyword_score(profile_text, product)) for product in products if product.get("is_active", True)),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    ranked = [item[0] for item in scored if item[1] > 0]
+    if ranked:
+        return ranked[:top_n]
+    return [product for product in products if product.get("is_active", True)][:top_n]
+
+
+def generate_outreach_email(
+    creator: dict,
+    product: dict,
+    commission_rate: float,
+    campaign_name: str | None = None,
+) -> dict:
+    """
+    生成主动首封开发邮件草稿。
+    返回: {"subject": str, "body": str}
+    """
+    creator_name = creator.get("name") or "there"
+    product_name = product.get("name") or "our product"
+    commission_text = f"{float(commission_rate or 0):g}%"
+    tags_text = ", ".join(creator.get("tags", []) or []) or "content creator"
+
+    system_prompt = f"""你是 {config.BRAND_NAME} 的达人合作开发专员。
+
+请为首次主动联系达人生成一封自然、真诚、简洁的商务开发邮件草稿。
+
+硬性要求：
+1. 默认使用英文，除非达人画像明显显示应使用其他语言。
+2. 语气像真实商务合作邀请，不像群发广告。
+3. 必须明确提到：
+   - 我们愿意提供产品免费试用
+   - 对方如果有兴趣，可以进一步了解合作条件
+   - 当前推荐产品与达人内容方向的契合点
+   - 佣金比例为 {commission_text}
+4. 不能出现夸张营销语、不能像垃圾邮件、不能使用多个感叹号。
+5. 正文控制在 140-220 词。
+6. 结尾署名必须使用：{config.BRAND_SIGNATURE}
+7. 仅返回 JSON：{{"subject":"...", "body":"..."}}"""
+
+    user_prompt = f"""达人信息：
+- 姓名：{creator_name}
+- 邮箱：{creator.get('email', '')}
+- 平台：{creator.get('platform', '')}
+- 国家/语言：{creator.get('country', '')} / {creator.get('language', '')}
+- 标签：{tags_text}
+- 达人画像：{creator.get('identity_summary', '')}
+- 备注：{creator.get('notes', '')}
+
+产品信息：
+- 名称：{product_name}
+- 店铺名：{product.get('store_name', config.BRAND_NAME)}
+- ASIN：{product.get('asin', '')}
+- 卖点：{product.get('tagline', '')}
+- 场景：{product.get('scene', '')}
+- 描述：{product.get('description') or product.get('intro', '')}
+- 关键词：{", ".join(product.get('keywords', []) or [])}
+
+批次信息：
+- 名称：{campaign_name or 'default outreach'}
+
+请输出首封开发邮件草稿。"""
+
+    try:
+        raw = call_llm(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.55,
+            max_tokens=700,
+        )
+        data = json.loads(_clean_json_block(raw))
+        subject = (data.get("subject") or "").strip()
+        body = (data.get("body") or "").strip()
+        if subject and body:
+            return {"subject": subject, "body": body}
+    except Exception as exc:
+        logger.warning(f"⚠️ 首封开发邮件生成失败，使用兜底模板: {exc}")
+
+    subject = f"{creator_name}, a product collaboration idea from {config.BRAND_NAME}"
+    body = (
+        f"Hi {creator_name},\n\n"
+        f"I'm reaching out from {config.BRAND_NAME}. We think your {creator.get('platform') or 'content'} "
+        f"audience may be a strong fit for {product_name}. Based on your focus on {tags_text}, "
+        f"we'd love to offer you a free product sample so you can see whether it feels like a natural match.\n\n"
+        f"If the product is a fit for your audience, we can also discuss a {commission_text} commission structure "
+        f"for future collaboration. The main reason we picked {product_name} is its angle around "
+        f"{product.get('tagline') or product.get('scene') or 'real everyday use'}.\n\n"
+        f"If you're open to it, I'd be happy to share the details and next steps.\n\n"
+        f"{config.BRAND_SIGNATURE}"
+    )
+    return {"subject": subject, "body": body}
+
+
+def detect_creator_reply_intent(
+    creator: dict,
+    latest_message: str,
+    thread_history: list[dict],
+    product: dict | None = None,
+) -> dict:
+    """
+    识别达人回信意图，返回结构化结果。
+    intent:
+      - interested
+      - not_interested
+      - need_followup
+      - manual_review
+    """
+    creator_name = creator.get("name") or creator.get("email") or "creator"
+    product_name = product.get("name") if product else ""
+    history_lines = []
+    for item in thread_history[-6:]:
+        role = "Our Team" if item.get("is_mine") else creator_name
+        history_lines.append(f"[{role}] {item.get('body', '')[:260].replace(chr(10), ' ')}")
+    history_text = "\n".join(history_lines) or "(no history)"
+
+    system_prompt = """你是达人商务回信分类助手。
+
+我方已向达人发送产品合作邀请邮件，现在需要判断达人回信的意图。
+
+请根据回信内容判断意图，并只返回 JSON：
+{
+  "intent": "interested|not_interested|need_followup|manual_review",
+  "confidence": 0-1,
+  "summary": "一句中文摘要",
+  "reasoning": "一句简短原因"
+}
+
+判定标准（前两类均会生成合作工单由人工跟进）：
+- interested: 达人明确表达合作意向——愿意试用产品、愿意合作、愿意了解/推进细节、表示可以沟通
+- need_followup: 达人有正面/积极态度，但提出了疑问或需要更多信息（如问产品细节、佣金比例、合作流程等）——这也是有意向的信号，同样生成工单
+- not_interested: 达人明确拒绝、婉拒、表示暂不感兴趣或不接受此类合作
+- manual_review: 回信语义完全模糊、与合作无关、或系统无法稳妥判断（如自动回复、乱码、纯问候等）"""
+
+    user_prompt = f"""达人：{creator_name}
+产品：{product_name}
+
+近期历史：
+{history_text}
+
+最新回信：
+{latest_message[:1500]}"""
+
+    try:
+        raw = call_llm(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.1,
+            max_tokens=220,
+        )
+        result = json.loads(_clean_json_block(raw))
+        intent = result.get("intent", "manual_review")
+        if intent not in {"interested", "not_interested", "need_followup", "manual_review"}:
+            intent = "manual_review"
+        return {
+            "intent": intent,
+            "confidence": float(result.get("confidence", 0) or 0),
+            "summary": result.get("summary", "") or result.get("reasoning", ""),
+            "reasoning": result.get("reasoning", ""),
+            "raw": _clean_json_block(raw),
+        }
+    except Exception as exc:
+        logger.warning(f"⚠️ 意图识别失败，使用规则兜底: {exc}")
+
+    text = (latest_message or "").lower()
+    if any(token in text for token in ["not interested", "no thanks", "pass", "decline", "unsubscribe", "不感兴趣", "暂不", "不用了", "拒绝", "不需要"]):
+        return {
+            "intent": "not_interested",
+            "confidence": 0.72,
+            "summary": "达人明确表示当前不考虑合作。",
+            "reasoning": "规则兜底命中拒绝词。",
+            "raw": "",
+        }
+    if any(token in text for token in ["interested", "sounds good", "let's do it", "yes", "sure", "absolutely", "love to", "happy to", "合作", "感兴趣", "可以", "了解一下", "愿意"]):
+        return {
+            "intent": "interested",
+            "confidence": 0.55,
+            "summary": "达人表达了合作意向。",
+            "reasoning": "规则兜底命中明确合作积极词。",
+            "raw": "",
+        }
+    if any(token in text for token in ["how", "details", "commission", "rate", "what product", "shipping", "more info", "tell me", "流程", "佣金", "产品", "细节", "怎么", "什么条件", "如何合作"]):
+        return {
+            "intent": "need_followup",
+            "confidence": 0.61,
+            "summary": "达人有意向并询问合作细节，需人工跟进。",
+            "reasoning": "规则兜底命中追问词，判定为有意向待跟进。",
+            "raw": "",
+        }
+    return {
+        "intent": "manual_review",
+        "confidence": 0.3,
+        "summary": "回信语义不够明确，仅记录。",
+        "reasoning": "规则兜底未命中明确意图。",
+        "raw": "",
+    }
+
+
+def generate_polite_decline_reply(
+    creator: dict,
+    product: dict | None = None,
+) -> str:
+    creator_name = creator.get("name") or "there"
+    product_name = product.get("name") if product else "our products"
+
+    system_prompt = f"""你是 {config.BRAND_NAME} 的达人合作专员。
+请写一封非常简短、真诚、有分寸的感谢回复邮件，适用于达人婉拒合作的场景。
+
+要求：
+- 默认使用英文，除非达人资料明显显示应使用其他语言
+- 感谢对方回复
+- 表达未来如果对 {product_name} 或其他新品有兴趣，欢迎随时联系
+- 不要施压，不要再次推销
+- 控制在 60-120 词
+- 结尾署名使用：{config.BRAND_SIGNATURE}
+- 只输出正文"""
+
+    user_prompt = f"""达人姓名：{creator_name}
+达人语言：{creator.get('language', '')}
+产品：{product_name}"""
+
+    try:
+        return call_llm(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.4,
+            max_tokens=220,
+        )
+    except Exception as exc:
+        logger.warning(f"⚠️ 感谢回复生成失败，使用模板兜底: {exc}")
+        return (
+            f"Hi {creator_name},\n\n"
+            f"Thank you for getting back to us. We completely understand, and we appreciate you taking the time to reply. "
+            f"If you ever feel that {product_name} or any future launches might be a fit for your audience, "
+            f"please feel free to reach out anytime.\n\n"
+            f"{config.BRAND_SIGNATURE}"
+        )
