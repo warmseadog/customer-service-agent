@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.database import delete_product, list_products, upsert_product
+from app.database import delete_all_products, delete_product, list_products, upsert_product
 
 
 def _normalize_keywords(value: Any) -> list[str]:
@@ -32,6 +32,10 @@ def save_product(payload: dict) -> dict:
 
 def remove_product(product_id: str) -> bool:
     return delete_product(product_id)
+
+
+def remove_all_products() -> int:
+    return delete_all_products()
 
 
 def list_product_rows(active_only: bool = False) -> list[dict]:

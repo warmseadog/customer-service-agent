@@ -5,6 +5,8 @@ from typing import Any
 from app.database import (
     create_campaign,
     create_outreach_message,
+    delete_campaign,
+    delete_outreach_message,
     get_campaign,
     get_creator,
     get_outreach_message,
@@ -96,6 +98,10 @@ def list_campaign_rows() -> list[dict]:
     ]
 
 
+def remove_campaign(campaign_id: int) -> bool:
+    return delete_campaign(campaign_id)
+
+
 def list_campaign_outreach(campaign_id: int) -> list[dict]:
     rows = list_outreach_messages(campaign_id=campaign_id)
     enriched = []
@@ -121,6 +127,10 @@ def list_campaign_outreach(campaign_id: int) -> list[dict]:
 def update_outreach_draft(outreach_id: int, payload: dict) -> dict | None:
     fields = {k: v for k, v in payload.items() if k in {"subject", "body", "status"}}
     return update_outreach_message(outreach_id, **fields)
+
+
+def remove_outreach_message(outreach_id: int) -> bool:
+    return delete_outreach_message(outreach_id)
 
 
 def send_outreach_by_id(outreach_id: int) -> dict:

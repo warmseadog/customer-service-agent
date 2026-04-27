@@ -321,22 +321,45 @@ def generate_outreach_email(
     commission_text = f"{float(commission_rate or 0):g}%"
     tags_text = ", ".join(creator.get("tags", []) or []) or "content creator"
 
+    # 只在佣金 > 0 时才提及，0% 写出来反而像诈骗信
+    commission_hint = (
+        f"- 如对合作有兴趣，可自然提到我方提供 {commission_text} 的销售分成，表述要口语化"
+        if float(commission_rate or 0) > 0
+        else "- 不要在邮件中提及任何佣金或分成数字"
+    )
+
     system_prompt = f"""你是 {config.BRAND_NAME} 的达人合作开发专员。
 
-请为首次主动联系达人生成一封自然、真诚、简洁的商务开发邮件草稿。
+请为首次主动联系达人生成一封自然、真诚、简洁的商务开发邮件草稿（纯文本，不含任何 HTML 标签）。
 
-硬性要求：
+核心写作原则：
 1. 默认使用英文，除非达人画像明显显示应使用其他语言。
-2. 语气像真实商务合作邀请，不像群发广告。
-3. 必须明确提到：
-   - 我们愿意提供产品免费试用
-   - 对方如果有兴趣，可以进一步了解合作条件
-   - 当前推荐产品与达人内容方向的契合点
-   - 佣金比例为 {commission_text}
-4. 不能出现夸张营销语、不能像垃圾邮件、不能使用多个感叹号。
-5. 正文控制在 140-220 词。
-6. 结尾署名必须使用：{config.BRAND_SIGNATURE}
-7. 仅返回 JSON：{{"subject":"...", "body":"..."}}"""
+2. 语气像朋友间的真实商务信，而非营销模板或群发广告。
+3. 内容框架：
+   - 第一句：简短提及你关注过对方的具体内容（不要泛泛称赞）
+   - 说明产品与达人内容方向的自然契合点（1-2句）
+   - 提出愿意寄产品给对方亲自试用（禁止用 "free sample"，改用 "send you a unit to try" 或类似自然表达）
+   {commission_hint}
+   - 结尾轻松邀请对方感兴趣时回复，不施加压力，不催促
+
+【严格禁止，这些词会直接触发垃圾邮件过滤器】：
+主题禁止出现：Collaboration Opportunity, Partnership Opportunity, Exciting, Elevate, Exclusive, Deal, Offer, Promotion, Amazing, Incredible
+正文禁止出现：free sample, commission is set at, earn money, make money, click here, limited time, act now, guaranteed, no obligation, risk-free, 100%
+
+其他格式禁止：
+- 禁止使用多个感叹号（全文最多 1 个）
+- 禁止全大写单词
+- 禁止 HTML 标签（<p>, <br>, <a> 等一律不用）
+
+主题行要求（非常重要）：
+- 短且具体，最多 8-10 个词
+- 像真人写给具体某位达人的私信，不是广告标题
+- 好例子："Quick question about your home content"、"Your recent [topic] post — a thought"、"A product idea for your [platform] audience"
+- 坏例子：任何含 Opportunity / Partnership / Elevate / Exciting 的标题
+
+正文长度：120-180 词（不含署名）。
+结尾署名：{config.BRAND_SIGNATURE}
+仅返回 JSON：{{"subject":"...", "body":"..."}}"""
 
     user_prompt = f"""达人信息：
 - 姓名：{creator_name}
@@ -378,16 +401,22 @@ def generate_outreach_email(
     except Exception as exc:
         logger.warning(f"⚠️ 首封开发邮件生成失败，使用兜底模板: {exc}")
 
-    subject = f"{creator_name}, a product collaboration idea from {config.BRAND_NAME}"
+    platform = creator.get('platform') or 'your channel'
+    tagline = product.get('tagline') or product.get('scene') or 'everyday use'
+    subject = f"A quick question about your {platform} content"
+    commission_line = (
+        f"If it's a good fit, we can also discuss a {commission_text} revenue share for future posts.\n\n"
+        if float(commission_rate or 0) > 0
+        else ""
+    )
     body = (
         f"Hi {creator_name},\n\n"
-        f"I'm reaching out from {config.BRAND_NAME}. We think your {creator.get('platform') or 'content'} "
-        f"audience may be a strong fit for {product_name}. Based on your focus on {tags_text}, "
-        f"we'd love to offer you a free product sample so you can see whether it feels like a natural match.\n\n"
-        f"If the product is a fit for your audience, we can also discuss a {commission_text} commission structure "
-        f"for future collaboration. The main reason we picked {product_name} is its angle around "
-        f"{product.get('tagline') or product.get('scene') or 'real everyday use'}.\n\n"
-        f"If you're open to it, I'd be happy to share the details and next steps.\n\n"
+        f"I came across your {platform} content and really liked how you cover {tags_text} — "
+        f"it aligns closely with what {product_name} is designed for.\n\n"
+        f"We'd love to send you a unit to try. {product_name} is built around {tagline}, "
+        f"and I think it could be a natural fit for the kind of content your audience enjoys.\n\n"
+        f"{commission_line}"
+        f"Would you be open to hearing more? Happy to share details whenever it's convenient.\n\n"
         f"{config.BRAND_SIGNATURE}"
     )
     return {"subject": subject, "body": body}

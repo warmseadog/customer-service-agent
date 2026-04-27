@@ -485,6 +485,26 @@ def bulk_upsert_creators(items: list[dict]) -> dict:
     return {"created": created, "updated": updated, "errors": errors}
 
 
+def delete_creator(creator_id: int) -> bool:
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM creators WHERE id = ?", (creator_id,))
+    changes = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return changes > 0
+
+
+def delete_all_creators() -> int:
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM creators")
+    changes = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return changes
+
+
 # ─── products ─────────────────────────────────────────────────────────────────
 
 def list_products(active_only: bool = False) -> list[dict]:
@@ -572,6 +592,14 @@ def delete_product(product_id: str) -> bool:
     return bool(deleted)
 
 
+def delete_all_products() -> int:
+    conn = _get_conn()
+    deleted = conn.execute("DELETE FROM products").rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+
 # ─── campaigns / outreach ─────────────────────────────────────────────────────
 
 def create_campaign(name: str, product_id: str, commission_rate: float, notes: str = "") -> dict:
@@ -603,6 +631,19 @@ def get_campaign(campaign_id: int) -> dict | None:
     row = conn.execute("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def delete_campaign(campaign_id: int) -> bool:
+    conn = _get_conn()
+    cursor = conn.cursor()
+    # Delete associated outreach messages (drafts) first
+    cursor.execute("DELETE FROM outreach_messages WHERE campaign_id = ?", (campaign_id,))
+    # Delete the campaign itself
+    cursor.execute("DELETE FROM campaigns WHERE id = ?", (campaign_id,))
+    changes = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return changes > 0
 
 
 def update_campaign(campaign_id: int, **fields: Any) -> dict | None:
@@ -720,6 +761,14 @@ def get_outreach_message_by_thread_id(thread_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def delete_outreach_message(outreach_id: int) -> bool:
+    conn = _get_conn()
+    deleted = conn.execute("DELETE FROM outreach_messages WHERE id = ?", (outreach_id,)).rowcount
+    conn.commit()
+    conn.close()
+    return bool(deleted)
+
+
 def list_outreach_messages(campaign_id: int | None = None) -> list[dict]:
     conn = _get_conn()
     if campaign_id is None:
@@ -771,6 +820,22 @@ def create_intent_result(data: dict) -> dict:
     row = conn.execute("SELECT * FROM intent_results WHERE id = ?", (rid,)).fetchone()
     conn.close()
     return dict(row) if row else {}
+
+
+def delete_intent_result(intent_id: int) -> bool:
+    conn = _get_conn()
+    deleted = conn.execute("DELETE FROM intent_results WHERE id = ?", (intent_id,)).rowcount
+    conn.commit()
+    conn.close()
+    return bool(deleted)
+
+
+def delete_all_intent_results() -> int:
+    conn = _get_conn()
+    deleted = conn.execute("DELETE FROM intent_results").rowcount
+    conn.commit()
+    conn.close()
+    return deleted
 
 
 def list_intent_results(limit: int = 100) -> list[dict]:
@@ -850,6 +915,22 @@ def update_ticket_status(ticket_id: int, status: str) -> dict | None:
     row = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def delete_ticket(ticket_id: int) -> bool:
+    conn = _get_conn()
+    deleted = conn.execute("DELETE FROM tickets WHERE id = ?", (ticket_id,)).rowcount
+    conn.commit()
+    conn.close()
+    return bool(deleted)
+
+
+def delete_all_tickets() -> int:
+    conn = _get_conn()
+    deleted = conn.execute("DELETE FROM tickets").rowcount
+    conn.commit()
+    conn.close()
+    return deleted
 
 
 def list_collaboration_leads() -> list[dict]:
@@ -1025,6 +1106,22 @@ def delete_thread(thread_id: str) -> int:
     conn.commit()
     conn.close()
     return deleted
+
+
+def clear_all_thread_data() -> dict:
+    """
+    清空全部线程相关数据：对话历史、线程状态、已处理邮件去重。
+    不删除：外呼草稿/已发记录、意图识别流水、工单、达人、产品等。
+    """
+    conn = _get_conn()
+    result = {
+        "thread_messages": conn.execute("DELETE FROM thread_messages").rowcount,
+        "processed_messages": conn.execute("DELETE FROM processed_messages").rowcount,
+        "kol_threads": conn.execute("DELETE FROM kol_threads").rowcount,
+    }
+    conn.commit()
+    conn.close()
+    return result
 
 
 def delete_all_data() -> dict:

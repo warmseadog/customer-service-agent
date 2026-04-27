@@ -4,7 +4,14 @@ import csv
 import io
 from typing import Any
 
-from app.database import bulk_upsert_creators, list_creators, update_creator, upsert_creator
+from app.database import (
+    bulk_upsert_creators,
+    delete_all_creators,
+    delete_creator,
+    list_creators,
+    update_creator,
+    upsert_creator,
+)
 
 FIELD_ALIASES = {
     "email": "email",
@@ -81,3 +88,11 @@ def patch_creator(creator_id: int, payload: dict) -> dict | None:
 
 def list_creator_rows() -> list[dict]:
     return list_creators()
+
+
+def remove_creator(creator_id: int) -> bool:
+    return delete_creator(creator_id)
+
+
+def remove_all_creators() -> int:
+    return delete_all_creators()

@@ -12,7 +12,7 @@ Gmail 将邮件判为 Spam 通常有以下原因：
   1. In-Reply-To + References：串联 Thread，Gmail 识别为合法会话回复
   2. multipart/alternative：同时发送 HTML + 纯文本，与真实商务邮件格式一致
   3. Auto-Submitted: no：告知 Gmail 这是人工发送的回复，非批量自动化邮件
-  4. 不使用伪造的 X-Mailer：避免 Gmail 检测到头部欺骗而判为垃圾邮件
+  4. X-Mailer: Microsoft Outlook 16.0：消除 Python email 库的自动化指纹
 ─────────────────────────────────────────────────────────────
 """
 
@@ -20,6 +20,7 @@ import logging
 import smtplib
 import ssl
 import html as html_lib
+import uuid
 from datetime import datetime
 from email import charset as _charset_mod
 from email.mime.text import MIMEText
@@ -31,6 +32,18 @@ from email.utils import parseaddr, make_msgid, formataddr, formatdate
 # 能降低被 Gmail 内容过滤器识别为批量自动化邮件的概率。
 _UTF8_QP = _charset_mod.Charset("utf-8")
 _UTF8_QP.body_encoding = _charset_mod.QP
+
+
+def _outlook_boundary() -> str:
+    """
+    生成与 Microsoft Outlook 格式相同的 MIME boundary。
+    Python email 库默认生成 '===============...==' 格式，
+    这是自动化脚本的显著指纹，会被反垃圾引擎直接识别。
+    Outlook 格式示例：----=_Part_a3f2b1c4_1745720012345
+    """
+    rand_hex = uuid.uuid4().hex[:8]
+    timestamp_ms = int(datetime.now().timestamp() * 1000)
+    return f"----=_Part_{rand_hex}_{timestamp_ms}"
 
 from imap_tools import MailBox, AND
 
@@ -163,10 +176,7 @@ def send_reply(
         new_references = f"{orig_refs} {orig_msg_id}".strip() if orig_refs else orig_msg_id
 
         # ── 构造 multipart/alternative（HTML + 纯文本双版本） ──────────────
-        # Gmail 对 multipart/alternative 格式的信任度远高于纯文本邮件，
-        # 因为所有真实的商务邮件客户端（Outlook/Gmail/Apple Mail）
-        # 默认均以此格式发送，纯文本邮件反而像脚本批量发送。
-        msg = MIMEMultipart("alternative")
+        msg = MIMEMultipart("alternative", boundary=_outlook_boundary())
 
         # From: 真实人名 + 邮箱（比单独邮箱地址可信度更高，不像机器发送）
         msg["From"] = formataddr((config.SENDER_DISPLAY_NAME, config.EMAIL_ADDRESS))
@@ -177,6 +187,7 @@ def send_reply(
         msg["Subject"]    = reply_subject
         msg["Date"]       = formatdate(localtime=True)
         msg["Message-ID"] = make_msgid(domain=config.EMAIL_ADDRESS.split("@")[-1])
+        msg["X-Mailer"]   = "Microsoft Outlook 16.0"
 
         # ── Thread 串联头部（告知 Gmail 这是合法会话回复） ────────────────
         msg["In-Reply-To"] = orig_msg_id
@@ -233,16 +244,25 @@ def send_outreach_email(
     """
     message_id = make_msgid(domain=config.EMAIL_ADDRESS.split("@")[-1])
     sent_at = datetime.now().isoformat()
+    sender_domain = config.EMAIL_ADDRESS.split("@")[-1]
     try:
-        msg = MIMEMultipart("alternative")
+        msg = MIMEMultipart("alternative", boundary=_outlook_boundary())
         msg["From"] = formataddr((config.SENDER_DISPLAY_NAME, config.EMAIL_ADDRESS))
         msg["To"] = formataddr((to_name or to_email, to_email))
         msg["Subject"] = subject
         msg["Date"] = formatdate(localtime=True)
         msg["Message-ID"] = message_id
+        msg["X-Mailer"]   = "Microsoft Outlook 16.0"
 
-        text_part = MIMEText(body, "plain", _UTF8_QP)
-        html_part = MIMEText(_text_to_html(body, config.SENDER_DISPLAY_NAME), "html", _UTF8_QP)
+        # List-Unsubscribe 是 Gmail 官方指南要求的商业邮件头部，
+        # 缺少此头部会显著提升被判为促销/垃圾的概率
+        unsubscribe_mailto = f"<mailto:{config.EMAIL_ADDRESS}?subject=unsubscribe>"
+        msg["List-Unsubscribe"] = unsubscribe_mailto
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+
+        body_with_footer = _append_unsubscribe_footer(body, config.EMAIL_ADDRESS)
+        text_part = MIMEText(body_with_footer, "plain", _UTF8_QP)
+        html_part = MIMEText(_text_to_html(body_with_footer, config.SENDER_DISPLAY_NAME), "html", _UTF8_QP)
         msg.attach(text_part)
         msg.attach(html_part)
 
@@ -271,21 +291,52 @@ def send_outreach_email(
 
 # ─── HTML 生成辅助 ──────────────────────────────────────────────────────────────
 
+import re as _re
+
+def _strip_html_tags(text: str) -> str:
+    """移除 LLM 偶尔在纯文本正文里混入的 HTML 标签（<p>, <br>, <a> 等）。"""
+    # 先把 <br> / <br/> 转换为换行，再去掉其余所有标签
+    text = _re.sub(r'<br\s*/?>', '\n', text, flags=_re.IGNORECASE)
+    text = _re.sub(r'<[^>]+>', '', text)
+    # 修复 LLM 生成的 </p > 等畸形闭合标签产生的多余空格
+    text = _re.sub(r'\s{3,}', '\n\n', text)
+    return text.strip()
+
+
+def _append_unsubscribe_footer(body: str, reply_email: str) -> str:
+    """在纯文本正文末尾附加一行退订说明（CAN-SPAM 合规）。"""
+    footer = f"\n\n---\nIf you'd prefer not to receive messages like this, reply with 'unsubscribe' and I'll remove you right away."
+    return body.rstrip() + footer
+
+
 def _text_to_html(text: str, sender_name: str) -> str:
     """
-    将纯文本回复正文转换为带基础样式的 HTML。
+    将纯文本正文转换为带基础样式的 HTML。
 
     生成的 HTML 与 Outlook/Gmail Web 客户端发出的邮件格式高度相似，
     能显著提升 Gmail 对邮件合法性的信任度。
+
+    注意：先对 LLM 输出做 strip_html_tags，避免把模型偶尔生成的
+    原始 HTML 标签直接暴露在 HTML part 里（会被 Gmail 视为异常格式）。
     """
-    escaped = html_lib.escape(text)
+    clean_text = _strip_html_tags(text)
+    escaped = html_lib.escape(clean_text)
     # 段落之间用空行分隔，每段用 <p> 包裹；行内换行用 <br>
     paragraphs = escaped.split("\n\n")
     body_html = ""
     for para in paragraphs:
         lines = para.strip()
         if lines:
-            body_html += f"<p>{lines.replace(chr(10), '<br>')}</p>\n"
+            # 退订说明行用小字灰色样式区分
+            if lines.startswith("---"):
+                footer_content = lines[3:].strip()
+                body_html += (
+                    f'<p style="font-size:11px;color:#888888;border-top:1px solid #e5e5e5;'
+                    f'padding-top:12px;margin-top:24px;">'
+                    f'{footer_content.replace(chr(10), "<br>")}</p>\n'
+                )
+            else:
+                body_html += f"<p>{lines.replace(chr(10), '<br>')}</p>\n"
 
     return f"""\
 <!DOCTYPE html>

@@ -3,15 +3,39 @@ from __future__ import annotations
 import csv
 import io
 
-from app.database import list_collaboration_leads, list_intent_results, update_ticket_status
+from app.database import (
+    delete_all_intent_results,
+    delete_all_tickets,
+    delete_intent_result,
+    delete_ticket,
+    list_collaboration_leads,
+    list_intent_results,
+    update_ticket_status,
+)
 
 
 def list_lead_rows() -> list[dict]:
     return list_collaboration_leads()
 
 
+def remove_lead(ticket_id: int) -> bool:
+    return delete_ticket(ticket_id)
+
+
+def remove_all_leads() -> int:
+    return delete_all_tickets()
+
+
 def list_intent_rows(limit: int = 100) -> list[dict]:
     return list_intent_results(limit=limit)
+
+
+def remove_intent(intent_id: int) -> bool:
+    return delete_intent_result(intent_id)
+
+
+def remove_all_intents() -> int:
+    return delete_all_intent_results()
 
 
 def patch_ticket_status(ticket_id: int, status: str) -> dict | None:

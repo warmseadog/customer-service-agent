@@ -26,6 +26,7 @@ button.success{background:#16a34a}
 .box h3{font-size:16px;margin-bottom:12px}
 label{display:block;font-size:12px;color:#94a3b8;margin-bottom:6px}
 input,textarea,select{width:100%;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin-bottom:12px}
+input[type=checkbox],input[type=radio]{width:auto;max-width:none;margin-bottom:0;vertical-align:middle}
 textarea{min-height:90px;resize:vertical}
 .table-wrap{overflow:auto}.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .tbl th,.tbl td{border-bottom:1px solid #1f2937;padding:10px 8px;text-align:left;vertical-align:top}
@@ -34,6 +35,63 @@ textarea{min-height:90px;resize:vertical}
 .pill.interested{background:#14532d;color:#86efac}.pill.not_interested{background:#450a0a;color:#fca5a5}
 .pill.need_followup{background:#422006;color:#fcd34d}.pill.manual_review{background:#1e3a8a;color:#93c5fd}
 .pill.status-new{background:#1e3a8a;color:#93c5fd}.pill.status-in_progress{background:#422006;color:#fcd34d}.pill.status-done{background:#14532d;color:#86efac}
+.pill.outreach-sent{background:#14532d;color:#86efac}.pill.outreach-unsent{background:#422006;color:#fcd34d}
+.creator-bulk-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.creator-bulk-bar button.small,.creator-bulk-bar .btn-small{padding:4px 10px;font-size:11px}
+.grid>.box{min-width:0}
+#campaign-creator-list{
+  width:100%;
+  min-width:0;
+  max-width:100%;
+  max-height:min(400px,55vh);
+  border:1px solid #334155;
+  border-radius:10px;
+  padding:10px;
+  background:#020617;
+  margin-bottom:12px;
+  overflow-x:hidden;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+}
+.creator-cb-row{
+  display:flex;
+  flex-direction:row;
+  align-items:flex-start;
+  gap:10px;
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  box-sizing:border-box;
+  padding:6px 4px;
+  border-radius:8px;
+}
+.creator-cb-row:hover{background:rgba(30,41,59,.45)}
+.creator-cb-row input[type=checkbox].creator-cb{
+  flex:0 0 18px;
+  width:18px;
+  height:18px;
+  margin:2px 0 0 0;
+  cursor:pointer;
+}
+label.creator-cb-label{
+  display:flex !important;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px 8px;
+  flex:1 1 0;
+  min-width:0 !important;
+  max-width:100%;
+  margin:0 !important;
+  color:#cbd5e1;
+  cursor:pointer;
+  font-size:13px;
+  line-height:1.45;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
+.creator-cb-label .cr-line{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0;max-width:100%}
+.creator-cb-label .pill{flex-shrink:0}
+.creator-cb-label strong{min-width:0}
 .ticket-card{background:#020617;border:1px solid #1f2937;border-radius:14px;padding:16px;border-left:4px solid #4f46e5}
 .ticket-card.intent-interested{border-left-color:#16a34a}.ticket-card.intent-need_followup{border-left-color:#f59e0b}
 .list{display:flex;flex-direction:column;gap:12px}.item{background:#020617;border:1px solid #1f2937;border-radius:14px;padding:14px}
@@ -120,7 +178,10 @@ textarea{min-height:90px;resize:vertical}
       </div>
     </div>
     <div class="box" style="margin-top:16px">
-      <h3>达人列表</h3>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+        <h3>达人列表</h3>
+        <button class="danger small" onclick="deleteAllCreators()">全部删除</button>
+      </div>
       <div class="table-wrap">
         <table class="tbl">
           <thead><tr><th>ID</th><th>邮箱</th><th>名称</th><th>平台</th><th>标签</th><th>状态</th><th>备注</th><th>操作</th></tr></thead>
@@ -178,17 +239,33 @@ textarea{min-height:90px;resize:vertical}
         <select id="campaign-product"></select>
         <label>佣金覆盖（可留空，默认按产品佣金）</label>
         <input id="campaign-commission" placeholder="例如 12">
-        <label>达人 ID（可留空表示全量达人，多个用英文逗号分隔）</label>
-        <input id="campaign-creators" placeholder="1,2,3">
+        <label>选择达人（显示外呼状态：已发送 / 未发送；可批量勾选）</label>
+        <div class="creator-bulk-bar">
+          <button type="button" class="secondary btn-small" onclick="selectAllCreators(true)">全选</button>
+          <button type="button" class="secondary btn-small" onclick="selectAllCreators(false)">取消全选</button>
+          <button type="button" class="secondary btn-small" onclick="invertCreatorSelection()">反选</button>
+          <span style="width:1px;height:14px;background:#334155"></span>
+          <button type="button" class="secondary btn-small" onclick="selectCreatorsBySent(false)">仅未发送</button>
+          <button type="button" class="secondary btn-small" onclick="selectCreatorsBySent(true)">仅已发送</button>
+          <span style="width:1px;height:14px;background:#334155"></span>
+          <span class="muted" style="font-size:12px;margin:0">前</span>
+          <input type="number" id="campaign-first-n" min="1" value="50" style="width:64px;margin:0;padding:4px 8px">
+          <span class="muted" style="font-size:12px;margin:0">人</span>
+          <button type="button" class="secondary btn-small" onclick="selectCreatorsFirstN()">只勾前N人</button>
+          <button type="button" class="secondary btn-small" title="在现有勾选基础上，再按顺序勾上 N 个尚未勾选的" onclick="selectNextUnselectedN()">再勾N个未选</button>
+        </div>
+        <div id="campaign-creator-list">
+          <div class="empty small">请先在达人库添加达人...</div>
+        </div>
         <button onclick="createCampaign()">生成批次草稿</button>
       </div>
       <div class="box">
         <h3>使用方式</h3>
         <div class="muted">
           1. 先准备达人库与产品库。<br>
-          2. 生成批次后，会为每位达人生成一封草稿。<br>
-          3. 你可以逐条编辑主题与正文。<br>
-          4. 支持单条发送，也支持整批发送。
+          2. <strong>已发送 / 未发送</strong>：系统曾成功寄出过开发信则为「已发送」，否则为「未发送」（便于只勾未联系过的）。<br>
+          3. 量大时用「只勾前N人」「再勾N个未选」「仅未发送」等组合，不必全选。<br>
+          4. 生成批次后可为每位达人生成草稿，再逐条或整批发送。
         </div>
       </div>
     </div>
@@ -212,6 +289,7 @@ textarea{min-height:90px;resize:vertical}
           <option value="in_progress">跟进中</option>
           <option value="done">已完成</option>
         </select>
+        <button class="danger small" onclick="deleteAllLeads()">清空工单</button>
       </div>
     </div>
     <div id="lead-list" class="list"><div class="empty">加载中...</div></div>
@@ -220,11 +298,17 @@ textarea{min-height:90px;resize:vertical}
   <section id="tab-inbox" class="panel">
     <div class="grid">
       <div class="box">
-        <h3>回信意图识别结果</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+          <h3>回信意图识别结果</h3>
+          <button class="danger small" onclick="deleteAllIntents()">清空记录</button>
+        </div>
         <div id="intent-list" class="list"><div class="empty">加载中...</div></div>
       </div>
       <div class="box">
-        <h3>线程概览</h3>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+          <h3>线程概览</h3>
+          <button class="danger small" onclick="deleteAllThreads()">清空线程</button>
+        </div>
         <div id="thread-list" class="list"><div class="empty">加载中...</div></div>
       </div>
     </div>
@@ -284,7 +368,30 @@ async function loadStatus(){
 async function loadCreators(){
   const data=await fetchJson('/creators');
   const tbody=document.getElementById('creator-rows');
-  if(!data.creators.length){tbody.innerHTML='<tr><td colspan="8" class="empty">暂无达人</td></tr>';return;}
+  const creatorList=document.getElementById('campaign-creator-list');
+  
+  if(!data.creators.length){
+    tbody.innerHTML='<tr><td colspan="8" class="empty">暂无达人</td></tr>';
+    creatorList.innerHTML='<div class="empty small">暂无达人可选</div>';
+    return;
+  }
+  
+  creatorList.innerHTML=data.creators.map(c=>{
+    const sent = !!(c.last_outreach_at && String(c.last_outreach_at).trim());
+    return `
+    <div class="creator-cb-row" data-sent="${sent?'1':'0'}">
+      <input type="checkbox" class="creator-cb" value="${c.id}" id="cb-creator-${c.id}">
+      <label class="creator-cb-label" for="cb-creator-${c.id}">
+        <span class="cr-line">
+          <span class="pill ${sent?'outreach-sent':'outreach-unsent'}">${sent?'已发送':'未发送'}</span>
+          <strong>${esc(c.name||c.email)}</strong>
+          <span class="muted" style="font-size:12px;">${esc(c.platform||'未填平台')}</span>
+        </span>
+      </label>
+    </div>
+  `;
+  }).join('');
+  
   tbody.innerHTML=data.creators.map(row=>`<tr>
     <td>${row.id}</td>
     <td>${esc(row.email)}</td>
@@ -293,7 +400,10 @@ async function loadCreators(){
     <td>${esc((row.tags||[]).join(', '))}</td>
     <td>${esc(row.collaboration_status||'new')}</td>
     <td>${esc(row.notes||'')}</td>
-    <td><button class="secondary small" onclick='editCreator(${JSON.stringify(row)})'>编辑</button></td>
+    <td>
+      <button class="secondary small" onclick='editCreator(${JSON.stringify(row)})'>编辑</button>
+      <button class="danger small" onclick='deleteCreator(${JSON.stringify(row.id)})'>删除</button>
+    </td>
   </tr>`).join('');
 }
 function editCreator(row){
@@ -324,6 +434,33 @@ async function saveCreator(){
     await api('POST','/creators',payload);
   }
   ['creator-email','creator-name','creator-platform','creator-country','creator-tags','creator-summary'].forEach(id=>document.getElementById(id).value='');
+}
+async function deleteCreator(id){
+  if(!confirm('确认删除达人 '+id+' ?')) return;
+  await api('DELETE','/creators/'+encodeURIComponent(id));
+}
+async function deleteAllCreators(){
+  if(!confirm('危险操作：确认清空所有达人数据吗？')) return;
+  const result = await api('DELETE','/creators');
+  showBanner(`已清空 ${result.deleted_count||0} 条达人数据`, true);
+}
+async function deleteAllLeads(){
+  if(!confirm('危险操作：确认清空所有合作工单吗？')) return;
+  const result = await api('DELETE','/leads');
+  showBanner(`已清空 ${result.deleted_count||0} 条工单`, true);
+}
+async function deleteAllIntents(){
+  if(!confirm('确认清空所有回信识别记录吗？')) return;
+  const result = await api('DELETE','/intents');
+  showBanner(`已清空 ${result.deleted_count||0} 条识别记录`, true);
+}
+async function deleteAllThreads(){
+  if(!confirm('将清空：线程状态、多轮对话记录、已处理邮件去重表（之后同一封未读可再次进入处理）。不删除外呼/工单/达人/产品。确认？')) return;
+  const result = await api('DELETE','/threads');
+  const tm = result.thread_messages ?? 0;
+  const pm = result.processed_messages ?? 0;
+  const kt = result.kol_threads ?? 0;
+  showBanner(`线程已清空：对话 ${tm} 条、去重 ${pm} 条、线程 ${kt} 条`, true);
 }
 async function importCreators(){
   let csvText=document.getElementById('creator-csv').value.trim();
@@ -382,31 +519,114 @@ async function deleteProduct(id){
   if(!confirm('确认删除产品 '+id+' ?')) return;
   await api('DELETE','/products/'+encodeURIComponent(id));
 }
-async function createCampaign(){
-  const creatorIds=splitList(document.getElementById('campaign-creators').value).map(Number).filter(Boolean);
-  await api('POST','/campaigns/draft',{
-    name:document.getElementById('campaign-name').value,
-    product_id:document.getElementById('campaign-product').value,
-    commission_rate:document.getElementById('campaign-commission').value || null,
-    creator_ids:creatorIds.length?creatorIds:null,
+function selectAllCreators(checked) {
+  document.querySelectorAll('#campaign-creator-list .creator-cb').forEach(cb => { cb.checked = checked; });
+}
+function selectCreatorsBySent(sent) {
+  document.querySelectorAll('#campaign-creator-list .creator-cb-row').forEach(row => {
+    const cb = row.querySelector('.creator-cb');
+    if (!cb) return;
+    const want = sent ? '1' : '0';
+    cb.checked = row.getAttribute('data-sent') === want;
   });
+}
+function invertCreatorSelection() {
+  document.querySelectorAll('#campaign-creator-list .creator-cb').forEach(cb => { cb.checked = !cb.checked; });
+}
+function _campaignBulkN() {
+  const el = document.getElementById('campaign-first-n');
+  const n = el ? parseInt(el.value, 10) : 50;
+  return Math.max(1, isNaN(n) ? 50 : n);
+}
+function selectCreatorsFirstN() {
+  const n = _campaignBulkN();
+  const boxes = document.querySelectorAll('#campaign-creator-list .creator-cb');
+  boxes.forEach((cb, i) => { cb.checked = i < n; });
+}
+function selectNextUnselectedN() {
+  const n = _campaignBulkN();
+  let added = 0;
+  document.querySelectorAll('#campaign-creator-list .creator-cb').forEach(cb => {
+    if (added >= n) return;
+    if (!cb.checked) { cb.checked = true; added++; }
+  });
+}
+async function createCampaign(){
+  const btn = event.currentTarget;
+  const originalText = btn.textContent;
+  btn.textContent = '生成中 (可能需要几分钟)...';
+  btn.disabled = true;
+  try {
+    const creatorIds = Array.from(document.querySelectorAll('#campaign-creator-list .creator-cb:checked')).map(cb => Number(cb.value));
+    await api('POST','/campaigns/draft',{
+      name:document.getElementById('campaign-name').value,
+      product_id:document.getElementById('campaign-product').value,
+      commission_rate:document.getElementById('campaign-commission').value || null,
+      creator_ids:creatorIds.length?creatorIds:null,
+    });
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+async function deleteCampaign(id){
+  if(!confirm('危险：确认删除该外呼批次及其所有草稿吗？')) return;
+  await api('DELETE','/campaigns/'+id);
 }
 async function saveDraft(id){
   const subject=document.getElementById('draft-subject-'+id).value;
   const body=document.getElementById('draft-body-'+id).value;
   await api('PUT','/outreach/'+id,{subject,body});
 }
-async function sendDraft(id){
-  await api('POST','/outreach/'+id+'/send');
+function toggleDraft(id) {
+  const el = document.getElementById('draft-editor-' + id);
+  if (!el) return;
+  if (el.style.display === 'none') {
+    el.style.display = 'block';
+  } else {
+    el.style.display = 'none';
+  }
 }
-async function sendCampaign(id){
-  await api('POST','/campaigns/'+id+'/send');
+async function deleteDraft(id) {
+  if(!confirm('确认删除此草稿吗？')) return;
+  await api('DELETE','/outreach/'+id);
+}
+async function sendDraft(id){
+  const btn = event.currentTarget;
+  const originalText = btn.textContent;
+  btn.textContent = '发送中...';
+  btn.disabled = true;
+  try {
+    await api('POST','/outreach/'+id+'/send');
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+async function sendCampaign(id, count){
+  if(count === 0) {
+    showBanner('没有可发送的草稿', false);
+    return;
+  }
+  if(!confirm(`确认发送此批次的 ${count} 封未发送邮件吗？`)) return;
+  const btn = event.currentTarget;
+  const originalText = btn.textContent;
+  btn.textContent = '发送中...';
+  btn.disabled = true;
+  try {
+    await api('POST','/campaigns/'+id+'/send');
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
 }
 async function loadCampaigns(){
   const data=await fetchJson('/campaigns');
   const el=document.getElementById('campaign-list');
   if(!data.campaigns.length){el.innerHTML='<div class="empty">暂无外呼批次</div>';return;}
-  el.innerHTML=data.campaigns.map(c=>`
+  el.innerHTML=data.campaigns.map(c=>{
+    const unsentCount = (c.messages||[]).filter(m => m.status !== 'sent').length;
+    return `
     <div class="item">
       <div class="item-head">
         <div>
@@ -414,29 +634,41 @@ async function loadCampaigns(){
           <div class="muted">批次 ID: ${c.id} · 绑定产品: ${esc(c.product_id||'自动推荐')} · 达人数量: ${c.creator_count||0}</div>
         </div>
         <div class="draft-actions">
-          <button class="success" onclick="sendCampaign(${c.id})">整批发送</button>
+          <button class="success" onclick="sendCampaign(${c.id}, ${unsentCount})" ${unsentCount===0?'disabled style="opacity:0.5;cursor:not-allowed"':''}>整批发送 (${unsentCount} 封未发送)</button>
+          <button class="danger" onclick="deleteCampaign(${c.id})">删除此批次</button>
         </div>
       </div>
       ${(c.messages||[]).map(m=>`
-        <div class="box" style="margin-top:12px">
-          <div class="item-head">
+        <div class="box" style="margin-top:12px; padding:12px;">
+          <div class="item-head" style="align-items:center;">
             <div>
-              <div><strong>${esc(m.creator_name||m.creator_email||'')}</strong> <span class="muted">${esc(m.creator_email||'')}</span></div>
-              <div class="muted">产品: ${esc(m.product_name||m.product_id||'')} · 状态: ${esc(m.status||'draft')}</div>
+              <div style="font-size:14px;"><strong>${esc(m.creator_name||m.creator_email||'未知')}</strong> <span class="muted">${esc(m.creator_email||'')}</span></div>
+              <div class="muted" style="font-size:12px; margin-top:4px;">
+                状态: <span class="pill" style="font-size:11px; padding:2px 6px; background:${m.status==='sent'?'#14532d':'#1e293b'}; color:${m.status==='sent'?'#86efac':''}">${esc(m.status||'draft')}</span> 
+                · 产品: ${esc(m.product_name||m.product_id||'自动分配')}
+              </div>
             </div>
             <div class="draft-actions">
-              <button class="secondary small" onclick="saveDraft(${m.id})">保存草稿</button>
-              <button class="success small" onclick="sendDraft(${m.id})">发送此条</button>
+              <button class="secondary small" onclick="toggleDraft(${m.id})">${m.status === 'sent' ? '查看详情' : '编辑草稿'}</button>
+              ${m.status === 'sent' ? '' : `<button class="success small" onclick="sendDraft(${m.id})">发送此条</button>`}
+              ${m.status === 'sent' ? '' : `<button class="danger small" onclick="deleteDraft(${m.id})">删除此条</button>`}
             </div>
           </div>
-          <label>主题</label>
-          <input id="draft-subject-${m.id}" value="${esc(m.subject||'')}">
-          <label>正文</label>
-          <textarea id="draft-body-${m.id}" style="min-height:150px">${esc(m.body||'')}</textarea>
+          <div id="draft-editor-${m.id}" style="display:none; margin-top:12px; border-top:1px solid #1f2937; padding-top:12px;">
+            <label>主题</label>
+            <input id="draft-subject-${m.id}" value="${esc(m.subject||'')}" ${m.status==='sent'?'disabled':''}>
+            <label>正文</label>
+            <textarea id="draft-body-${m.id}" style="min-height:150px" ${m.status==='sent'?'disabled':''}>${esc(m.body||'')}</textarea>
+            ${m.status === 'sent' ? '' : `
+            <div style="text-align:right">
+              <button class="secondary small" onclick="saveDraft(${m.id})">保存修改</button>
+            </div>
+            `}
+          </div>
         </div>
       `).join('')}
     </div>
-  `).join('');
+  `}).join('');
 }
 const STATUS_LABELS={new:'待跟进',in_progress:'跟进中',done:'已完成'};
 const INTENT_LABELS={interested:'确认合作',need_followup:'有意向·待确认'};
