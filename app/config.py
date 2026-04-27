@@ -41,6 +41,16 @@ class Config:
     # Products
     PRODUCTS_PATH: str = _get("PRODUCTS_PATH", "data/products.json")
 
+    # Customer Service — escalation & reply
+    DEFAULT_SUPPORT_OWNER_EMAIL:        str  = _get("DEFAULT_SUPPORT_OWNER_EMAIL", "")
+    DEFAULT_SUPPORT_OWNER_NAME:         str  = _get("DEFAULT_SUPPORT_OWNER_NAME", "Support Owner")
+    AUTO_REPLY_ON_ESCALATION:           bool = _get("AUTO_REPLY_ON_ESCALATION", "true").lower() not in ("false", "0", "no")
+    ALLOW_COMPENSATION_PROMISES:        bool = _get("ALLOW_COMPENSATION_PROMISES", "false").lower() in ("true", "1", "yes")
+    REPEAT_DISSATISFACTION_HOURS:       int  = int(_get("REPEAT_DISSATISFACTION_HOURS", "24"))
+    ESCALATION_EMAIL_COOLDOWN_MINUTES:  int  = int(_get("ESCALATION_EMAIL_COOLDOWN_MINUTES", "60"))
+    # 不满/安抚类：首次对外承诺「已联系售后」时，是否忽略同线程升级邮件冷却，确保每封都能发出内部通知
+    CALM_BYPASS_ESCALATION_COOLDOWN: bool = _get("CALM_BYPASS_ESCALATION_COOLDOWN", "true").lower() not in ("false", "0", "no")
+
     # Server
     HOST:                 str = _get("HOST", "0.0.0.0")
     PORT:                 int = int(_get("PORT", "8000"))

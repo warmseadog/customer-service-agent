@@ -23,6 +23,9 @@ def normalize_product_payload(payload: dict) -> dict:
     normalized["keywords"] = _normalize_keywords(payload.get("keywords"))
     normalized["commission_rate"] = float(payload.get("commission_rate") or 0)
     normalized["is_active"] = bool(payload.get("is_active", True))
+    normalized["owner_name"] = (payload.get("owner_name") or "").strip()
+    normalized["owner_email"] = (payload.get("owner_email") or "").strip()
+    normalized["fallback_owner_email"] = (payload.get("fallback_owner_email") or "").strip()
     return normalized
 
 

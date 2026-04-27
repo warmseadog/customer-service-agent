@@ -1,13 +1,14 @@
 """
 database.py — SQLite 持久化层
 
-在保留原有 thread/message 能力的基础上，补齐：
-  1. 达人主档（creators）
-  2. 产品库（products）
-  3. 外呼批次（campaigns）
-  4. 主动外呼记录（outreach_messages）
-  5. 意图识别结果（intent_results）
-  6. 合作线索（collaboration_leads）
+表结构：
+  1. 联系人主档（creators）
+  2. 产品库（products）含 owner 字段
+  3. 线程状态（kol_threads）
+  4. 消息历史（thread_messages）
+  5. 意图/情绪识别结果（intent_results）含 cs_sentiment/cs_tone/escalated
+  6. 升级事件（escalation_events）
+  7. 外呼历史（campaigns/outreach_messages）— 保留表结构供数据兼容，不再写入新数据
 """
 
 from __future__ import annotations
@@ -101,9 +102,11 @@ def _seed_products_if_needed(conn: sqlite3.Connection) -> None:
             """
             INSERT OR IGNORE INTO products (
                 id, name, description, keywords, store_name, asin,
-                commission_rate, tagline, scene, intro, is_active, created_at, updated_at
+                commission_rate, tagline, scene, intro, is_active,
+                owner_name, owner_email, fallback_owner_email,
+                created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
             """,
             (
                 str(product_id),
@@ -116,6 +119,9 @@ def _seed_products_if_needed(conn: sqlite3.Connection) -> None:
                 item.get("tagline", ""),
                 item.get("scene", ""),
                 item.get("intro", ""),
+                item.get("owner_name", ""),
+                item.get("owner_email", ""),
+                item.get("fallback_owner_email", ""),
                 now,
                 now,
             ),
@@ -271,9 +277,30 @@ def init_db() -> None:
             summary         TEXT,
             suggested_reply TEXT,
             raw_json        TEXT,
+            cs_sentiment    TEXT,
+            cs_tone         TEXT,
+            escalated       INTEGER NOT NULL DEFAULT 0,
             created_at      TEXT NOT NULL
         )
         """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS escalation_events (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            thread_id         TEXT NOT NULL,
+            creator_id        INTEGER,
+            product_id        TEXT,
+            reason            TEXT,
+            internal_email_to TEXT NOT NULL,
+            sent_at           TEXT NOT NULL,
+            created_at        TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_escalation_events_thread_id ON escalation_events (thread_id, sent_at)"
     )
 
     cursor.execute(
@@ -311,6 +338,14 @@ def init_db() -> None:
     _ensure_column(conn, "thread_messages", "creator_id", "INTEGER")
     _ensure_column(conn, "thread_messages", "campaign_id", "INTEGER")
     _ensure_column(conn, "thread_messages", "outreach_id", "INTEGER")
+    # products — owner fields
+    _ensure_column(conn, "products", "owner_name", "TEXT")
+    _ensure_column(conn, "products", "owner_email", "TEXT")
+    _ensure_column(conn, "products", "fallback_owner_email", "TEXT")
+    # intent_results — customer service fields
+    _ensure_column(conn, "intent_results", "cs_sentiment", "TEXT")
+    _ensure_column(conn, "intent_results", "cs_tone", "TEXT")
+    _ensure_column(conn, "intent_results", "escalated", "INTEGER NOT NULL DEFAULT 0")
 
     _seed_products_if_needed(conn)
     conn.commit()
@@ -548,6 +583,9 @@ def upsert_product(data: dict) -> dict:
         "scene": (data.get("scene") or "").strip(),
         "intro": (data.get("intro") or "").strip(),
         "is_active": 1 if data.get("is_active", True) else 0,
+        "owner_name": (data.get("owner_name") or "").strip(),
+        "owner_email": (data.get("owner_email") or "").strip(),
+        "fallback_owner_email": (data.get("fallback_owner_email") or "").strip(),
         "created_at": now,
         "updated_at": now,
     }
@@ -557,11 +595,15 @@ def upsert_product(data: dict) -> dict:
         """
         INSERT INTO products (
             id, name, description, keywords, store_name, asin,
-            commission_rate, tagline, scene, intro, is_active, created_at, updated_at
+            commission_rate, tagline, scene, intro, is_active,
+            owner_name, owner_email, fallback_owner_email,
+            created_at, updated_at
         )
         VALUES (
             :id, :name, :description, :keywords, :store_name, :asin,
-            :commission_rate, :tagline, :scene, :intro, :is_active, :created_at, :updated_at
+            :commission_rate, :tagline, :scene, :intro, :is_active,
+            :owner_name, :owner_email, :fallback_owner_email,
+            :created_at, :updated_at
         )
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
@@ -574,6 +616,9 @@ def upsert_product(data: dict) -> dict:
             scene = excluded.scene,
             intro = excluded.intro,
             is_active = excluded.is_active,
+            owner_name = excluded.owner_name,
+            owner_email = excluded.owner_email,
+            fallback_owner_email = excluded.fallback_owner_email,
             updated_at = excluded.updated_at
         """,
         payload,
@@ -797,9 +842,10 @@ def create_intent_result(data: dict) -> dict:
         """
         INSERT INTO intent_results (
             thread_id, creator_id, campaign_id, product_id, message_id,
-            intent, confidence, summary, suggested_reply, raw_json, created_at
+            intent, confidence, summary, suggested_reply, raw_json,
+            cs_sentiment, cs_tone, escalated, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             data.get("thread_id", ""),
@@ -807,11 +853,14 @@ def create_intent_result(data: dict) -> dict:
             data.get("campaign_id"),
             data.get("product_id"),
             data.get("message_id"),
-            data.get("intent", "manual_review"),
+            data.get("intent", "cs_reply"),
             float(data.get("confidence") or 0),
             data.get("summary", ""),
             data.get("suggested_reply", ""),
             data.get("raw_json", ""),
+            data.get("cs_sentiment", ""),
+            data.get("cs_tone", ""),
+            1 if data.get("escalated") else 0,
             now,
         ),
     )
@@ -838,6 +887,102 @@ def delete_all_intent_results() -> int:
     return deleted
 
 
+def check_repeat_dissatisfaction(thread_id: str, hours: int) -> bool:
+    """判断该线程在指定小时内是否曾出现过 dissatisfied 情绪（排除最新一条）。"""
+    from datetime import timedelta
+    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+    conn = _get_conn()
+    row = conn.execute(
+        """
+        SELECT COUNT(1) AS cnt FROM intent_results
+        WHERE thread_id = ? AND cs_sentiment = 'dissatisfied' AND created_at >= ?
+        """,
+        (thread_id, cutoff),
+    ).fetchone()
+    conn.close()
+    return (row["cnt"] if row else 0) > 0
+
+
+def create_escalation_event(data: dict) -> dict:
+    now = _now_iso()
+    conn = _get_conn()
+    cursor = conn.execute(
+        """
+        INSERT INTO escalation_events (
+            thread_id, creator_id, product_id, reason, internal_email_to, sent_at, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            data.get("thread_id", ""),
+            data.get("creator_id"),
+            data.get("product_id"),
+            data.get("reason", ""),
+            data.get("internal_email_to", ""),
+            data.get("sent_at", now),
+            now,
+        ),
+    )
+    eid = cursor.lastrowid
+    conn.commit()
+    row = conn.execute("SELECT * FROM escalation_events WHERE id = ?", (eid,)).fetchone()
+    conn.close()
+    return dict(row) if row else {}
+
+
+def list_escalation_events(limit: int = 100) -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        """
+        SELECT ee.*,
+               c.email AS creator_email, c.name AS creator_name,
+               p.name AS product_name
+        FROM escalation_events ee
+        LEFT JOIN creators c ON ee.creator_id = c.id
+        LEFT JOIN products p ON ee.product_id = p.id
+        ORDER BY ee.created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return _dicts(rows)
+
+
+def get_last_escalation_time(thread_id: str) -> str | None:
+    """返回该线程最近一次升级的 sent_at ISO 字符串，若无则返回 None。"""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT sent_at FROM escalation_events WHERE thread_id = ? ORDER BY sent_at DESC LIMIT 1",
+        (thread_id,),
+    ).fetchone()
+    conn.close()
+    return row["sent_at"] if row else None
+
+
+def count_escalation_events() -> int:
+    conn = _get_conn()
+    row = conn.execute("SELECT COUNT(1) AS cnt FROM escalation_events").fetchone()
+    conn.close()
+    return row["cnt"] if row else 0
+
+
+def delete_escalation_event(escalation_id: int) -> bool:
+    conn = _get_conn()
+    deleted = conn.execute("DELETE FROM escalation_events WHERE id = ?", (escalation_id,)).rowcount
+    conn.commit()
+    conn.close()
+    return bool(deleted)
+
+
+def delete_all_escalation_events() -> int:
+    conn = _get_conn()
+    deleted = conn.execute("DELETE FROM escalation_events").rowcount
+    conn.commit()
+    conn.close()
+    return deleted
+
+
 def list_intent_results(limit: int = 100) -> list[dict]:
     conn = _get_conn()
     rows = conn.execute(
@@ -853,52 +998,6 @@ def list_intent_results(limit: int = 100) -> list[dict]:
     conn.close()
     return _dicts(rows)
 
-
-def upsert_collaboration_lead(data: dict) -> dict:
-    now = _now_iso()
-    conn = _get_conn()
-    conn.execute(
-        """
-        INSERT INTO tickets (
-            creator_id, campaign_id, product_id, thread_id, status,
-            commission_rate, intent, intent_summary, latest_message, notes, created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(creator_id, campaign_id, product_id) DO UPDATE SET
-            thread_id = excluded.thread_id,
-            status = CASE WHEN tickets.status IN ('in_progress','done') THEN tickets.status ELSE excluded.status END,
-            commission_rate = excluded.commission_rate,
-            intent = excluded.intent,
-            intent_summary = excluded.intent_summary,
-            latest_message = excluded.latest_message,
-            notes = excluded.notes,
-            updated_at = excluded.updated_at
-        """,
-        (
-            data["creator_id"],
-            data.get("campaign_id"),
-            data.get("product_id"),
-            data.get("thread_id"),
-            data.get("status", "new"),
-            float(data.get("commission_rate") or 0),
-            data.get("intent", "interested"),
-            data.get("intent_summary", data.get("notes", "")),
-            data.get("latest_message", ""),
-            data.get("notes", ""),
-            now,
-            now,
-        ),
-    )
-    conn.commit()
-    row = conn.execute(
-        """
-        SELECT * FROM tickets
-        WHERE creator_id = ? AND campaign_id IS ? AND product_id IS ?
-        """,
-        (data["creator_id"], data.get("campaign_id"), data.get("product_id")),
-    ).fetchone()
-    conn.close()
-    return dict(row) if row else {}
 
 
 def update_ticket_status(ticket_id: int, status: str) -> dict | None:
@@ -1132,6 +1231,7 @@ def delete_all_data() -> dict:
         "kol_threads": conn.execute("DELETE FROM kol_threads").rowcount,
         "outreach_messages": conn.execute("DELETE FROM outreach_messages").rowcount,
         "intent_results": conn.execute("DELETE FROM intent_results").rowcount,
+        "escalation_events": conn.execute("DELETE FROM escalation_events").rowcount,
         "tickets": conn.execute("DELETE FROM tickets").rowcount,
         "campaigns": conn.execute("DELETE FROM campaigns").rowcount,
         "creators": conn.execute("DELETE FROM creators").rowcount,

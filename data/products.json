@@ -5,7 +5,9 @@
     "tagline": "天然竹纤维材质，抑菌透气，告别过敏困扰",
     "scene": "卧室睡眠改善，适合过敏体质家庭及追求高品质睡眠人士",
     "keywords": ["床品", "被套", "枕套", "睡眠", "bedding", "bamboo", "sleep", "anti-bacterial", "hypoallergenic", "home", "bedroom"],
-    "intro": "采用100%有机竹纤维，天然抑菌率高达99.8%，亲肤透气四季皆宜，让每一夜都成为高质量睡眠。"
+    "intro": "采用100%有机竹纤维，天然抑菌率高达99.8%，亲肤透气四季皆宜，让每一夜都成为高质量睡眠。",
+    "owner_name": "李明",
+    "owner_email": "liming@example.com"
   },
   {
     "id": "P002",
@@ -13,7 +15,9 @@
     "tagline": "榉木实木框架，简约北欧设计，承重稳固不变形",
     "scene": "客厅、卧室、书房收纳整理，展示绿植与摆件",
     "keywords": ["收纳", "置物架", "书架", "北欧", "实木", "storage", "shelf", "nordic", "wood", "home decor", "living room"],
-    "intro": "精选优质榉木打造，五层可调节隔板，承重达50kg，北欧极简美学与强大收纳力的完美融合。"
+    "intro": "精选优质榉木打造，五层可调节隔板，承重达50kg，北欧极简美学与强大收纳力的完美融合。",
+    "owner_name": "李明",
+    "owner_email": "liming@example.com"
   },
   {
     "id": "P003",
@@ -21,7 +25,9 @@
     "tagline": "超声波冷雾技术，香薰加湿二合一，APP智能控制",
     "scene": "卧室、办公室、客厅，改善空气湿度，营造舒适环境",
     "keywords": ["加湿器", "香薰", "空气", "humidifier", "aromatherapy", "smart", "bedroom", "home", "air quality", "essential oil"],
-    "intro": "超声波雾化核心，4L大容量水箱，连接APP可定时调节，支持精油香薰模式，全屋湿度守护者。"
+    "intro": "超声波雾化核心，4L大容量水箱，连接APP可定时调节，支持精油香薰模式，全屋湿度守护者。",
+    "owner_name": "王芳",
+    "owner_email": "wangfang@example.com"
   },
   {
     "id": "P004",
@@ -29,7 +35,9 @@
     "tagline": "记忆棉填充，曲线贴合脊椎，久坐不疲劳",
     "scene": "居家办公、长途驾驶、办公室椅背防护，缓解腰酸背痛",
     "keywords": ["腰靠", "坐垫", "护腰", "久坐", "人体工学", "ergonomic", "lumbar support", "cushion", "office", "back pain", "home office"],
-    "intro": "医疗级慢回弹记忆棉，精准贴合腰椎曲线，3D立体镂空透气设计，让长时间伏案工作不再腰酸。"
+    "intro": "医疗级慢回弹记忆棉，精准贴合腰椎曲线，3D立体镂空透气设计，让长时间伏案工作不再腰酸。",
+    "owner_name": "王芳",
+    "owner_email": "wangfang@example.com"
   },
   {
     "id": "P005",
@@ -37,7 +45,9 @@
     "tagline": "一键折叠收纳，厨房岛台与餐桌自由切换",
     "scene": "小户型厨房扩容，临时备餐台，移动餐桌",
     "keywords": ["餐桌", "折叠桌", "岛台", "厨房", "小户型", "folding table", "kitchen island", "dining", "space saving", "home"],
-    "intro": "防水防油PVC台面，可折叠设计节省70%空间，附带4个储物挂钩和万向轮，小户型厨房的空间魔法师。"
+    "intro": "防水防油PVC台面，可折叠设计节省70%空间，附带4个储物挂钩和万向轮，小户型厨房的空间魔法师。",
+    "owner_name": "李明",
+    "owner_email": "liming@example.com"
   },
   {
     "id": "P006",
@@ -45,7 +55,9 @@
     "tagline": "天然橡胶底层，双面防滑，6mm黄金厚度护关节",
     "scene": "居家瑜伽、普拉提、拉伸训练，室内健身使用",
     "keywords": ["瑜伽垫", "健身垫", "运动", "瑜伽", "yoga mat", "exercise", "fitness", "non-slip", "pilates", "workout", "sports"],
-    "intro": "天然橡胶底+TPE面层双重防滑，6mm厚度精准保护膝关节，183×68cm大尺寸，附赠背带方便携带。"
+    "intro": "天然橡胶底+TPE面层双重防滑，6mm厚度精准保护膝关节，183×68cm大尺寸，附赠背带方便携带。",
+    "owner_name": "张伟",
+    "owner_email": "zhangwei@example.com"
   },
   {
     "id": "P007",
@@ -53,7 +65,9 @@
     "tagline": "蓝牙计数，自动识别跳绳次数，配套App记录每日运动",
     "scene": "居家有氧训练、减脂塑形、亲子健身互动",
     "keywords": ["跳绳", "健身", "运动", "减脂", "jump rope", "smart", "fitness", "cardio", "workout", "sports", "exercise"],
-    "intro": "内置芯片自动计数精准到0次误差，轴承顺滑速度可调，配套App记录卡路里燃烧，30天进步一目了然。"
+    "intro": "内置芯片自动计数精准到0次误差，轴承顺滑速度可调，配套App记录卡路里燃烧，30天进步一目了然。",
+    "owner_name": "张伟",
+    "owner_email": "zhangwei@example.com"
   },
   {
     "id": "P008",
@@ -61,7 +75,9 @@
     "tagline": "一套顶替15副哑铃，旋钮一拨快速切换重量",
     "scene": "居家力量训练、肌肉塑形，取代健身房哑铃区",
     "keywords": ["哑铃", "力量训练", "健身", "增肌", "dumbbell", "weight", "strength training", "fitness", "gym", "muscle", "sports"],
-    "intro": "铸铁+ABS外壳，5-30kg共15档旋钮调节，3秒完成重量切换，单副替代整套哑铃组，节省90%空间。"
+    "intro": "铸铁+ABS外壳，5-30kg共15档旋钮调节，3秒完成重量切换，单副替代整套哑铃组，节省90%空间。",
+    "owner_name": "张伟",
+    "owner_email": "zhangwei@example.com"
   },
   {
     "id": "P009",
@@ -69,7 +85,9 @@
     "tagline": "6档振动频率，20mm冲程深层放松，低噪音不扰邻",
     "scene": "运动后肌肉恢复、久坐肩颈放松、消除酸痛疲劳",
     "keywords": ["筋膜枪", "按摩", "肌肉放松", "运动恢复", "massage gun", "muscle", "recovery", "fascia", "sports", "relaxation", "health"],
-    "intro": "无刷电机超静音设计（<45dB），6速调节适配不同部位，2500mAh电池续航6小时，附6个专业按摩头。"
+    "intro": "无刷电机超静音设计（<45dB），6速调节适配不同部位，2500mAh电池续航6小时，附6个专业按摩头。",
+    "owner_name": "张伟",
+    "owner_email": "zhangwei@example.com"
   },
   {
     "id": "P010",
@@ -77,6 +95,8 @@
     "tagline": "5级渐进阻力，天然乳胶材质，全身训练一套搞定",
     "scene": "居家拉伸、力量辅助训练、康复训练、出差随身携带",
     "keywords": ["弹力带", "阻力带", "训练", "拉伸", "resistance band", "elastic", "fitness", "workout", "portable", "sports", "exercise"],
-    "intro": "天然乳胶制成弹性持久不断裂，5条阻力等级（5-40lbs）渐进配置，附教学手册，随时随地全身锻炼。"
+    "intro": "天然乳胶制成弹性持久不断裂，5条阻力等级（5-40lbs）渐进配置，附教学手册，随时随地全身锻炼。",
+    "owner_name": "张伟",
+    "owner_email": "zhangwei@example.com"
   }
 ]

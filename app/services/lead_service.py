@@ -1,29 +1,17 @@
-from __future__ import annotations
+"""
+lead_service.py — 意图/情绪流水读写服务
 
-import csv
-import io
+注意：合作工单（leads）、CSV 导出等外呼相关功能已随重构移除。
+本文件仅保留 intent_results 相关操作，供 main.py 路由使用。
+"""
+
+from __future__ import annotations
 
 from app.database import (
     delete_all_intent_results,
-    delete_all_tickets,
     delete_intent_result,
-    delete_ticket,
-    list_collaboration_leads,
     list_intent_results,
-    update_ticket_status,
 )
-
-
-def list_lead_rows() -> list[dict]:
-    return list_collaboration_leads()
-
-
-def remove_lead(ticket_id: int) -> bool:
-    return delete_ticket(ticket_id)
-
-
-def remove_all_leads() -> int:
-    return delete_all_tickets()
 
 
 def list_intent_rows(limit: int = 100) -> list[dict]:
@@ -36,33 +24,3 @@ def remove_intent(intent_id: int) -> bool:
 
 def remove_all_intents() -> int:
     return delete_all_intent_results()
-
-
-def patch_ticket_status(ticket_id: int, status: str) -> dict | None:
-    return update_ticket_status(ticket_id, status)
-
-
-def export_leads_csv() -> bytes:
-    rows = list_collaboration_leads()
-    buffer = io.StringIO()
-    fieldnames = [
-        "creator_name",
-        "creator_email",
-        "platform",
-        "campaign_name",
-        "product_name",
-        "asin",
-        "commission_rate",
-        "status",
-        "intent",
-        "intent_summary",
-        "latest_message",
-        "notes",
-        "updated_at",
-    ]
-    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
-    writer.writeheader()
-    for row in rows:
-        writer.writerow({name: row.get(name, "") for name in fieldnames})
-    # UTF-8 BOM 让 Excel 直接双击打开时正确识别中文编码
-    return "\ufeff" + buffer.getvalue()

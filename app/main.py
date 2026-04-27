@@ -1,5 +1,5 @@
 """
-main.py — FastAPI 入口 + 主动达人开发工作台
+main.py — FastAPI 入口（客服邮件工作台）
 """
 
 from __future__ import annotations
@@ -13,33 +13,25 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse
 
 from app.agent import run_check_cycle
 from app.config import config
 from app.database import (
     clear_all_thread_data,
-    count_pending_tickets,
+    count_escalation_events,
     delete_all_data,
+    delete_all_escalation_events,
+    delete_escalation_event,
     delete_thread,
     get_thread_messages,
     init_db,
     list_all_threads,
+    list_escalation_events,
     list_processed_messages,
 )
 from app.mail_service import fetch_unread_emails
-from app.services.campaign_service import (
-    create_campaign_drafts,
-    list_campaign_outreach,
-    list_campaign_rows,
-    remove_campaign,
-    remove_outreach_message,
-    send_campaign,
-    send_outreach_by_id,
-    update_outreach_draft,
-)
 from app.services.creator_service import (
-    import_creators_from_csv_text,
     list_creator_rows,
     patch_creator,
     remove_all_creators,
@@ -47,14 +39,9 @@ from app.services.creator_service import (
     save_creator,
 )
 from app.services.lead_service import (
-    export_leads_csv,
     list_intent_rows,
-    list_lead_rows,
-    patch_ticket_status,
     remove_all_intents,
-    remove_all_leads,
     remove_intent,
-    remove_lead,
 )
 from app.services.product_service import (
     list_product_rows,
@@ -96,19 +83,20 @@ logging.getLogger().addHandler(_mem_handler)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    logger.info("🚀 Creator Outreach Workbench 启动")
+    logger.info("🚀 客服邮件工作台启动")
     logger.info(f"   品牌: {config.BRAND_NAME}")
     logger.info(f"   邮箱: {config.EMAIL_ADDRESS}")
     logger.info(f"   LLM:  {config.LLM_MODEL} @ {config.LLM_BASE_URL}")
+    logger.info(f"   默认升级负责人: {config.DEFAULT_SUPPORT_OWNER_EMAIL or '（未配置）'}")
     logger.info("   Dashboard: http://localhost:8000/dashboard")
     yield
     logger.info("👋 服务已关闭")
 
 
 app = FastAPI(
-    title="Creator Outreach Workbench",
-    description="达人主动开发、本地 CRM、批量外呼与意图识别工作台",
-    version="4.0.0",
+    title="客服邮件工作台",
+    description="被动入站客服邮件处理：情绪分析、安抚回复、升级产品负责人",
+    version="5.0.0",
     lifespan=lifespan,
 )
 
@@ -124,24 +112,28 @@ async def _polling_loop():
 
 
 def _summary() -> dict:
-    creators = list_creator_rows()
+    contacts = list_creator_rows()
     products = list_product_rows()
-    campaigns = list_campaign_rows()
     intents = list_intent_rows(limit=200)
+    escalations = count_escalation_events()
     processed = list_processed_messages(limit=200)
     return {
-        "creators": len(creators),
+        "contacts": len(contacts),
         "products": len(products),
-        "campaigns": len(campaigns),
-        "leads": count_pending_tickets(),
         "intents": len(intents),
+        "escalations": escalations,
         "processed": len(processed),
     }
 
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "agent": "Creator Outreach Workbench", "version": "4.0.0"}
+    return {
+        "status": "ok",
+        "agent": "客服邮件工作台",
+        "version": "5.0.0",
+        "description": "被动入站客服：情绪分析 / 安抚回复 / 升级产品负责人",
+    }
 
 
 @app.get("/status")
@@ -152,6 +144,7 @@ async def get_status():
         "email_account": config.EMAIL_ADDRESS,
         "brand": config.BRAND_NAME,
         "llm_model": config.LLM_MODEL,
+        "default_support_owner": config.DEFAULT_SUPPORT_OWNER_EMAIL,
         "summary": _summary(),
     }
 
@@ -210,34 +203,36 @@ async def list_emails(limit: int = 10):
     }
 
 
+# ─── 联系人（creators 表，客服语义） ────────────────────────────────────────────
+
 @app.get("/creators")
 async def list_creators_api():
     rows = list_creator_rows()
-    return {"count": len(rows), "creators": rows}
+    return {"count": len(rows), "contacts": rows}
 
 
 @app.post("/creators")
 async def save_creator_api(payload: dict):
     try:
-        creator = save_creator(payload)
+        contact = save_creator(payload)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return {"status": "ok", "creator": creator}
+    return {"status": "ok", "contact": contact}
 
 
 @app.put("/creators/{creator_id}")
 async def update_creator_api(creator_id: int, payload: dict):
-    creator = patch_creator(creator_id, payload)
-    if not creator:
-        raise HTTPException(status_code=404, detail="达人不存在")
-    return {"status": "ok", "creator": creator}
+    contact = patch_creator(creator_id, payload)
+    if not contact:
+        raise HTTPException(status_code=404, detail="联系人不存在")
+    return {"status": "ok", "contact": contact}
 
 
 @app.delete("/creators/{creator_id}")
 async def delete_creator_api(creator_id: int):
     ok = remove_creator(creator_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="达人不存在或删除失败")
+        raise HTTPException(status_code=404, detail="联系人不存在或删除失败")
     return {"status": "ok"}
 
 
@@ -247,15 +242,7 @@ async def delete_all_creators_api():
     return {"status": "ok", "deleted_count": count}
 
 
-@app.post("/creators/import-csv")
-async def import_creators_api(payload: dict):
-    try:
-        result = import_creators_from_csv_text(payload.get("csv_text", ""))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    logger.info(f"📥 达人 CSV 导入完成: {result}")
-    return {"status": "ok", **result}
-
+# ─── 产品库（含 owner 字段，1A 唯一维护入口） ───────────────────────────────────
 
 @app.get("/products")
 async def list_products_api():
@@ -286,69 +273,7 @@ async def delete_all_products_api():
     return {"status": "ok", "deleted_count": count}
 
 
-@app.get("/campaigns")
-async def list_campaigns_api():
-    campaigns = list_campaign_rows()
-    return {"count": len(campaigns), "campaigns": campaigns}
-
-
-@app.post("/campaigns/draft")
-async def create_campaign_draft_api(payload: dict):
-    try:
-        result = create_campaign_drafts(payload)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    logger.info("🧩 已生成批次草稿")
-    return {"status": "ok", **result}
-
-
-@app.delete("/campaigns/{campaign_id}")
-async def delete_campaign_api(campaign_id: int):
-    ok = remove_campaign(campaign_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="批次不存在或删除失败")
-    return {"status": "ok"}
-
-
-@app.get("/campaigns/{campaign_id}/messages")
-async def campaign_messages_api(campaign_id: int):
-    rows = list_campaign_outreach(campaign_id)
-    return {"count": len(rows), "messages": rows}
-
-
-@app.put("/outreach/{outreach_id}")
-async def update_outreach_api(outreach_id: int, payload: dict):
-    updated = update_outreach_draft(outreach_id, payload)
-    if not updated:
-        raise HTTPException(status_code=404, detail="外呼记录不存在")
-    return {"status": "ok", "message": updated}
-
-
-@app.delete("/outreach/{outreach_id}")
-async def delete_outreach_api(outreach_id: int):
-    ok = remove_outreach_message(outreach_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="外呼草稿不存在或删除失败")
-    return {"status": "ok"}
-
-
-@app.post("/outreach/{outreach_id}/send")
-async def send_outreach_api(outreach_id: int):
-    try:
-        result = send_outreach_by_id(outreach_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return {"status": "ok", "message": result}
-
-
-@app.post("/campaigns/{campaign_id}/send")
-async def send_campaign_api(campaign_id: int):
-    try:
-        result = send_campaign(campaign_id)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return {"status": "ok", **result}
-
+# ─── 意图/情绪流水 ──────────────────────────────────────────────────────────────
 
 @app.get("/intents")
 async def list_intents_api(limit: int = 100):
@@ -360,7 +285,7 @@ async def list_intents_api(limit: int = 100):
 async def delete_intent_api(intent_id: int):
     ok = remove_intent(intent_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="意图识别记录不存在")
+        raise HTTPException(status_code=404, detail="记录不存在")
     return {"status": "deleted", "intent_id": intent_id}
 
 
@@ -370,52 +295,35 @@ async def delete_all_intents_api():
     return {"status": "ok", "deleted_count": count}
 
 
-@app.get("/leads")
-async def list_leads_api():
-    rows = list_lead_rows()
-    return {"count": len(rows), "leads": rows}
+# ─── 升级记录 ───────────────────────────────────────────────────────────────────
+
+@app.get("/escalations")
+async def list_escalations_api(limit: int = 100):
+    rows = list_escalation_events(limit=limit)
+    return {"count": len(rows), "escalations": rows}
 
 
-@app.delete("/leads/{lead_id}")
-async def delete_lead_api(lead_id: int):
-    ok = remove_lead(lead_id)
+@app.delete("/escalations/{escalation_id}")
+async def delete_escalation_api(escalation_id: int):
+    ok = delete_escalation_event(escalation_id)
     if not ok:
-        raise HTTPException(status_code=404, detail="工单不存在")
-    return {"status": "deleted", "lead_id": lead_id}
+        raise HTTPException(status_code=404, detail="记录不存在")
+    return {"status": "deleted", "escalation_id": escalation_id}
 
 
-@app.delete("/leads")
-async def delete_all_leads_api():
-    count = remove_all_leads()
+@app.delete("/escalations")
+async def delete_all_escalations_api():
+    count = delete_all_escalation_events()
+    logger.info(f"🗑️ 已清空升级记录 {count} 条")
     return {"status": "ok", "deleted_count": count}
 
 
-@app.patch("/leads/{lead_id}/status")
-async def patch_lead_status_api(lead_id: int, payload: dict):
-    status = payload.get("status", "")
-    updated = patch_ticket_status(lead_id, status)
-    if not updated:
-        raise HTTPException(status_code=400, detail="工单不存在或状态值无效（允许：new/in_progress/done）")
-    return {"status": "ok", "ticket": updated}
-
-
-@app.get("/leads/export")
-async def export_leads_api():
-    csv_text = export_leads_csv()
-    headers = {"Content-Disposition": 'attachment; filename="collaboration_tickets.csv"'}
-    return PlainTextResponse(csv_text, headers=headers, media_type="text/csv; charset=utf-8-sig")
-
+# ─── 会话/线程 ──────────────────────────────────────────────────────────────────
 
 @app.get("/kols")
 async def list_kols():
     threads = list_all_threads()
     return {"count": len(threads), "kols": threads}
-
-
-@app.get("/processed")
-async def list_processed(limit: int = 100):
-    records = list_processed_messages(limit=limit)
-    return {"count": len(records), "records": records}
 
 
 @app.get("/thread/{thread_id}")
@@ -437,6 +345,32 @@ async def clear_all_threads_api():
     return {"status": "ok", **result}
 
 
+# ─── 已处理邮件 ─────────────────────────────────────────────────────────────────
+
+@app.get("/processed")
+async def list_processed(limit: int = 100):
+    records = list_processed_messages(limit=limit)
+    return {"count": len(records), "records": records}
+
+
+# ─── 日志 ──────────────────────────────────────────────────────────────────────
+
+@app.get("/logs")
+async def get_logs(tail: int = 80):
+    logs = list(_log_buffer)[-tail:]
+    return {"count": len(logs), "logs": logs}
+
+
+@app.delete("/logs")
+async def clear_logs():
+    """清空当前进程内存中的运行日志（便于开发时刷新视图）。"""
+    n = len(_log_buffer)
+    _log_buffer.clear()
+    return {"status": "ok", "cleared_count": n}
+
+
+# ─── 重置 ──────────────────────────────────────────────────────────────────────
+
 @app.delete("/all-data")
 async def delete_all_api():
     result = delete_all_data()
@@ -444,11 +378,7 @@ async def delete_all_api():
     return {"status": "cleared", **result}
 
 
-@app.get("/logs")
-async def get_logs(tail: int = 80):
-    logs = list(_log_buffer)[-tail:]
-    return {"count": len(logs), "logs": logs}
-
+# ─── Dashboard ─────────────────────────────────────────────────────────────────
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Creator Outreach Workbench</title>
+<title>客服邮件工作台</title>
 <style>
 *{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#0f172a;color:#e2e8f0}
 .wrap{max-width:1480px;margin:0 auto;padding:20px}
@@ -21,85 +21,34 @@ button.success{background:#16a34a}
 .card .label{font-size:12px;color:#94a3b8;margin-bottom:8px}.card .value{font-size:22px;font-weight:700}
 .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.tab{background:#1e293b;color:#cbd5e1}.tab.active{background:#4f46e5}
 .panel{display:none;background:#111827;border:1px solid #1f2937;border-radius:16px;padding:16px}.panel.active{display:block}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .box{background:#0b1220;border:1px solid #1f2937;border-radius:14px;padding:16px}
 .box h3{font-size:16px;margin-bottom:12px}
 label{display:block;font-size:12px;color:#94a3b8;margin-bottom:6px}
 input,textarea,select{width:100%;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin-bottom:12px}
-input[type=checkbox],input[type=radio]{width:auto;max-width:none;margin-bottom:0;vertical-align:middle}
+input[type=checkbox]{width:auto;max-width:none;margin-bottom:0;vertical-align:middle}
 textarea{min-height:90px;resize:vertical}
 .table-wrap{overflow:auto}.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .tbl th,.tbl td{border-bottom:1px solid #1f2937;padding:10px 8px;text-align:left;vertical-align:top}
 .tbl th{color:#94a3b8;font-size:12px;text-transform:uppercase}
 .muted{color:#94a3b8;font-size:12px}.pill{display:inline-block;padding:3px 8px;border-radius:999px;background:#1e293b;font-size:12px}
-.pill.interested{background:#14532d;color:#86efac}.pill.not_interested{background:#450a0a;color:#fca5a5}
-.pill.need_followup{background:#422006;color:#fcd34d}.pill.manual_review{background:#1e3a8a;color:#93c5fd}
-.pill.status-new{background:#1e3a8a;color:#93c5fd}.pill.status-in_progress{background:#422006;color:#fcd34d}.pill.status-done{background:#14532d;color:#86efac}
-.pill.outreach-sent{background:#14532d;color:#86efac}.pill.outreach-unsent{background:#422006;color:#fcd34d}
-.creator-bulk-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
-.creator-bulk-bar button.small,.creator-bulk-bar .btn-small{padding:4px 10px;font-size:11px}
-.grid>.box{min-width:0}
-#campaign-creator-list{
-  width:100%;
-  min-width:0;
-  max-width:100%;
-  max-height:min(400px,55vh);
-  border:1px solid #334155;
-  border-radius:10px;
-  padding:10px;
-  background:#020617;
-  margin-bottom:12px;
-  overflow-x:hidden;
-  overflow-y:auto;
-  -webkit-overflow-scrolling:touch;
-}
-.creator-cb-row{
-  display:flex;
-  flex-direction:row;
-  align-items:flex-start;
-  gap:10px;
-  width:100%;
-  max-width:100%;
-  min-width:0;
-  box-sizing:border-box;
-  padding:6px 4px;
-  border-radius:8px;
-}
-.creator-cb-row:hover{background:rgba(30,41,59,.45)}
-.creator-cb-row input[type=checkbox].creator-cb{
-  flex:0 0 18px;
-  width:18px;
-  height:18px;
-  margin:2px 0 0 0;
-  cursor:pointer;
-}
-label.creator-cb-label{
-  display:flex !important;
-  flex-wrap:wrap;
-  align-items:center;
-  gap:6px 8px;
-  flex:1 1 0;
-  min-width:0 !important;
-  max-width:100%;
-  margin:0 !important;
-  color:#cbd5e1;
-  cursor:pointer;
-  font-size:13px;
-  line-height:1.45;
-  overflow-wrap:anywhere;
-  word-break:break-word;
-}
-.creator-cb-label .cr-line{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0;max-width:100%}
-.creator-cb-label .pill{flex-shrink:0}
-.creator-cb-label strong{min-width:0}
-.ticket-card{background:#020617;border:1px solid #1f2937;border-radius:14px;padding:16px;border-left:4px solid #4f46e5}
-.ticket-card.intent-interested{border-left-color:#16a34a}.ticket-card.intent-need_followup{border-left-color:#f59e0b}
+/* sentiment pills */
+.pill.satisfied{background:#14532d;color:#86efac}
+.pill.neutral{background:#1e3a8a;color:#93c5fd}
+.pill.dissatisfied{background:#450a0a;color:#fca5a5}
+/* tone pills */
+.pill.cooperative{background:#14532d;color:#86efac}
+.pill.firm{background:#422006;color:#fcd34d}
+.pill.hostile{background:#450a0a;color:#fca5a5}
+/* escalated pill */
+.pill.escalated{background:#7c2d12;color:#fed7aa}
+.pill.not-escalated{background:#1e293b;color:#94a3b8}
 .list{display:flex;flex-direction:column;gap:12px}.item{background:#020617;border:1px solid #1f2937;border-radius:14px;padding:14px}
 .item-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
 .draft-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .small{font-size:12px}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .empty{padding:18px;color:#64748b;text-align:center}
-@media (max-width:960px){.grid,.grid3,.two-col{grid-template-columns:1fr}}
+@media (max-width:960px){.grid,.two-col{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -107,216 +56,178 @@ label.creator-cb-label{
   <div id="banner" class="banner"></div>
   <div class="top">
     <div class="hero">
-      <h1>主动达人开发工作台</h1>
-      <p>支持 CSV 导入达人、批量发送产品邀请邮件、自动识别回信意图。有合作意向（明确合作或问询细节）的达人自动生成<strong>工单</strong>，由人工跟进对接；明确拒绝则自动发送感谢邮件；不回信不处理。</p>
+      <h1>客服邮件工作台</h1>
+      <p>自动处理用户来信：情绪分析、安抚回复、升级产品负责人。系统被动接收入站邮件，不发送任何主动外呼。</p>
     </div>
     <div class="controls">
       <button class="success" onclick="api('POST','/start-auto')">启动轮询</button>
       <button class="danger" onclick="api('POST','/stop-auto')">停止轮询</button>
-      <button class="warn" onclick="api('POST','/check')">立即检查回信</button>
+      <button class="warn" onclick="api('POST','/check')">立即检查来信</button>
       <button class="secondary" onclick="loadAll()">刷新数据</button>
-      <a class="btn secondary" href="/leads/export" target="_blank">导出工单 CSV</a>
     </div>
   </div>
 
   <div class="cards">
     <div class="card"><div class="label">轮询状态</div><div class="value" id="sum-running">-</div></div>
-    <div class="card"><div class="label">达人数量</div><div class="value" id="sum-creators">0</div></div>
+    <div class="card"><div class="label">联系人数量</div><div class="value" id="sum-contacts">0</div></div>
     <div class="card"><div class="label">产品数量</div><div class="value" id="sum-products">0</div></div>
-    <div class="card"><div class="label">批次数量</div><div class="value" id="sum-campaigns">0</div></div>
-    <div class="card"><div class="label">待处理工单</div><div class="value" id="sum-leads">0</div></div>
-    <div class="card"><div class="label">已识别回信</div><div class="value" id="sum-intents">0</div></div>
+    <div class="card"><div class="label">情绪识别流水</div><div class="value" id="sum-intents">0</div></div>
+    <div class="card"><div class="label">升级事件</div><div class="value" id="sum-escalations">0</div></div>
   </div>
 
   <div class="tabs">
-    <button class="tab active" onclick="switchTab('creators',this)">达人库</button>
+    <button class="tab active" onclick="switchTab('inbox',this)">会话/线程</button>
+    <button class="tab" onclick="switchTab('escalations',this)">升级记录</button>
+    <button class="tab" onclick="switchTab('intents',this)">情绪流水</button>
     <button class="tab" onclick="switchTab('products',this)">产品库</button>
-    <button class="tab" onclick="switchTab('campaigns',this)">外呼批次</button>
-    <button class="tab" onclick="switchTab('leads',this)">合作工单</button>
-    <button class="tab" onclick="switchTab('inbox',this)">回信识别</button>
+    <button class="tab" onclick="switchTab('contacts',this)">联系人</button>
     <button class="tab" onclick="switchTab('logs',this)">运行日志</button>
   </div>
 
-  <section id="tab-creators" class="panel active">
+  <!-- 会话/线程 -->
+  <section id="tab-inbox" class="panel active">
     <div class="grid">
       <div class="box">
-        <h3>CSV 导入达人</h3>
-        <div class="muted">支持中英文字段，例如 `email/name/platform/tags/identity_summary/notes` 或 `邮箱/达人名称/平台/标签/达人画像/备注`。</div>
-        <textarea id="creator-csv" placeholder="把 CSV 内容粘贴到这里，或用下方文件导入。"></textarea>
-        <div class="draft-actions">
-          <input id="creator-file" type="file" accept=".csv" style="max-width:260px">
-          <button onclick="importCreators()">导入 CSV</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <h3>线程概览</h3>
+          <button class="danger small" onclick="deleteAllThreads()">清空全部线程</button>
         </div>
+        <div id="thread-list" class="list"><div class="empty">加载中...</div></div>
       </div>
       <div class="box">
-        <h3>手工新增达人</h3>
-        <div class="two-col">
-          <div>
-            <label>邮箱</label>
-            <input id="creator-email" placeholder="creator@example.com">
-          </div>
-          <div>
-            <label>名称</label>
-            <input id="creator-name" placeholder="达人名称">
-          </div>
-        </div>
-        <div class="two-col">
-          <div>
-            <label>平台</label>
-            <input id="creator-platform" placeholder="TikTok / YouTube / Instagram">
-          </div>
-          <div>
-            <label>国家 / 语言</label>
-            <input id="creator-country" placeholder="US / EN">
-          </div>
-        </div>
-        <label>标签</label>
-        <input id="creator-tags" placeholder="home, lifestyle, fitness">
-        <label>达人画像</label>
-        <textarea id="creator-summary" placeholder="达人内容方向、受众画像、合作备注"></textarea>
-        <button onclick="saveCreator()">保存达人</button>
+        <h3>情绪识别最近记录</h3>
+        <div id="intent-preview" class="list"><div class="empty">加载中...</div></div>
       </div>
     </div>
-    <div class="box" style="margin-top:16px">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
-        <h3>达人列表</h3>
-        <button class="danger small" onclick="deleteAllCreators()">全部删除</button>
+  </section>
+
+  <!-- 升级记录 -->
+  <section id="tab-escalations" class="panel">
+    <div class="box">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <h3>升级事件列表</h3>
+        <button class="danger small" onclick="deleteAllEscalations()">清空全部</button>
       </div>
+      <div class="muted" style="margin-bottom:12px">系统判断需要人工介入时，向产品负责人发送内部升级通知邮件并记录于此。</div>
       <div class="table-wrap">
         <table class="tbl">
-          <thead><tr><th>ID</th><th>邮箱</th><th>名称</th><th>平台</th><th>标签</th><th>状态</th><th>备注</th><th>操作</th></tr></thead>
-          <tbody id="creator-rows"><tr><td colspan="8" class="empty">加载中...</td></tr></tbody>
+          <thead><tr><th>时间</th><th>线程 ID</th><th>联系人</th><th>产品</th><th>升级原因</th><th>通知发送至</th><th>操作</th></tr></thead>
+          <tbody id="escalation-rows"><tr><td colspan="7" class="empty">加载中...</td></tr></tbody>
         </table>
       </div>
     </div>
   </section>
 
+  <!-- 情绪流水 -->
+  <section id="tab-intents" class="panel">
+    <div class="box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3>情绪识别流水</h3>
+        <button class="danger small" onclick="deleteAllIntents()">清空记录</button>
+      </div>
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead><tr><th>时间</th><th>联系人</th><th>情绪</th><th>语气</th><th>是否升级</th><th>摘要</th><th>操作</th></tr></thead>
+          <tbody id="intent-rows"><tr><td colspan="7" class="empty">加载中...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 产品库 -->
   <section id="tab-products" class="panel">
     <div class="grid">
       <div class="box">
         <h3>新增 / 更新产品</h3>
+        <div class="muted" style="margin-bottom:12px">产品负责人（owner）是升级通知的唯一收件人，仅在此处维护（1A）。</div>
         <div class="two-col">
-          <div><label>产品 ID</label><input id="product-id" placeholder="P001 或 ASIN"></div>
-          <div><label>产品名称</label><input id="product-name" placeholder="产品名称"></div>
+          <div><label>产品 ID *</label><input id="product-id" placeholder="P001 或 ASIN"></div>
+          <div><label>产品名称 *</label><input id="product-name" placeholder="产品名称"></div>
         </div>
         <div class="two-col">
-          <div><label>店铺名称</label><input id="product-store" placeholder="店铺名"></div>
-          <div><label>ASIN</label><input id="product-asin" placeholder="ASIN"></div>
+          <div><label>负责人姓名</label><input id="product-owner-name" placeholder="张三"></div>
+          <div><label>负责人邮箱</label><input id="product-owner-email" placeholder="zhangsan@example.com"></div>
         </div>
+        <label>备用负责人邮箱（可选）</label>
+        <input id="product-fallback-email" placeholder="备用联系邮箱">
         <div class="two-col">
-          <div><label>佣金比例 (%)</label><input id="product-commission" placeholder="10"></div>
-          <div><label>关键词</label><input id="product-keywords" placeholder="home, decor, gift"></div>
+          <div><label>一句话卖点</label><input id="product-tagline" placeholder="产品核心卖点"></div>
+          <div><label>关键词</label><input id="product-keywords" placeholder="home, sleep, fitness"></div>
         </div>
-        <label>一句话卖点</label>
-        <input id="product-tagline" placeholder="产品核心卖点">
         <label>场景 / 描述</label>
-        <textarea id="product-desc" placeholder="产品描述、使用场景、推荐原因"></textarea>
+        <textarea id="product-desc" placeholder="产品描述、使用场景"></textarea>
         <button onclick="saveProduct()">保存产品</button>
       </div>
       <div class="box">
         <h3>说明</h3>
-        <div class="muted">产品库中的佣金比例会作为首期默认值，在生成批次时可以直接带出，也可以按批次临时覆盖。</div>
+        <div class="muted">
+          <strong>产品绑定与负责人（1A）：</strong><br><br>
+          产品库是系统绑定用户来信与产品负责人的唯一数据源。<br><br>
+          • <strong>owner_email</strong>：客服升级事件的首选收件人。<br>
+          • <strong>fallback_owner_email</strong>：owner_email 为空时使用。<br>
+          • 若产品无 owner，系统使用环境变量 <code>DEFAULT_SUPPORT_OWNER_EMAIL</code>。<br><br>
+          修改负责人 = 更新此表单或直接修改数据库。不提供线程级别的负责人切换。
+        </div>
       </div>
     </div>
     <div class="box" style="margin-top:16px">
-      <h3>产品列表</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <h3>产品列表</h3>
+        <button class="danger small" onclick="deleteAllProducts()">清空全部产品</button>
+      </div>
       <div class="table-wrap">
         <table class="tbl">
-          <thead><tr><th>ID</th><th>名称</th><th>店铺</th><th>ASIN</th><th>佣金</th><th>关键词</th><th>操作</th></tr></thead>
-          <tbody id="product-rows"><tr><td colspan="7" class="empty">加载中...</td></tr></tbody>
+          <thead><tr><th>ID</th><th>名称</th><th>负责人</th><th>负责人邮箱</th><th>关键词</th><th>操作</th></tr></thead>
+          <tbody id="product-rows"><tr><td colspan="6" class="empty">加载中...</td></tr></tbody>
         </table>
       </div>
     </div>
   </section>
 
-  <section id="tab-campaigns" class="panel">
+  <!-- 联系人 -->
+  <section id="tab-contacts" class="panel">
     <div class="grid">
       <div class="box">
-        <h3>创建外呼批次草稿</h3>
-        <label>批次名称</label>
-        <input id="campaign-name" placeholder="April Home Creator Batch">
-        <label>绑定产品（可留空，系统将按达人画像自动推荐）</label>
-        <select id="campaign-product"></select>
-        <label>佣金覆盖（可留空，默认按产品佣金）</label>
-        <input id="campaign-commission" placeholder="例如 12">
-        <label>选择达人（显示外呼状态：已发送 / 未发送；可批量勾选）</label>
-        <div class="creator-bulk-bar">
-          <button type="button" class="secondary btn-small" onclick="selectAllCreators(true)">全选</button>
-          <button type="button" class="secondary btn-small" onclick="selectAllCreators(false)">取消全选</button>
-          <button type="button" class="secondary btn-small" onclick="invertCreatorSelection()">反选</button>
-          <span style="width:1px;height:14px;background:#334155"></span>
-          <button type="button" class="secondary btn-small" onclick="selectCreatorsBySent(false)">仅未发送</button>
-          <button type="button" class="secondary btn-small" onclick="selectCreatorsBySent(true)">仅已发送</button>
-          <span style="width:1px;height:14px;background:#334155"></span>
-          <span class="muted" style="font-size:12px;margin:0">前</span>
-          <input type="number" id="campaign-first-n" min="1" value="50" style="width:64px;margin:0;padding:4px 8px">
-          <span class="muted" style="font-size:12px;margin:0">人</span>
-          <button type="button" class="secondary btn-small" onclick="selectCreatorsFirstN()">只勾前N人</button>
-          <button type="button" class="secondary btn-small" title="在现有勾选基础上，再按顺序勾上 N 个尚未勾选的" onclick="selectNextUnselectedN()">再勾N个未选</button>
+        <h3>手工新增联系人</h3>
+        <div class="two-col">
+          <div><label>邮箱 *</label><input id="creator-email" placeholder="user@example.com"></div>
+          <div><label>姓名</label><input id="creator-name" placeholder="客户姓名"></div>
         </div>
-        <div id="campaign-creator-list">
-          <div class="empty small">请先在达人库添加达人...</div>
+        <div class="two-col">
+          <div><label>语言</label><input id="creator-language" placeholder="zh-CN / en-US"></div>
+          <div><label>备注</label><input id="creator-notes" placeholder="备注"></div>
         </div>
-        <button onclick="createCampaign()">生成批次草稿</button>
+        <button onclick="saveCreator()">保存联系人</button>
       </div>
       <div class="box">
-        <h3>使用方式</h3>
-        <div class="muted">
-          1. 先准备达人库与产品库。<br>
-          2. <strong>已发送 / 未发送</strong>：系统曾成功寄出过开发信则为「已发送」，否则为「未发送」（便于只勾未联系过的）。<br>
-          3. 量大时用「只勾前N人」「再勾N个未选」「仅未发送」等组合，不必全选。<br>
-          4. 生成批次后可为每位达人生成草稿，再逐条或整批发送。
-        </div>
+        <h3>说明</h3>
+        <div class="muted">联系人由系统在处理来信时自动入库，也可在此手动添加。系统不向联系人发送任何主动邀请邮件。</div>
       </div>
     </div>
     <div class="box" style="margin-top:16px">
-      <h3>批次与草稿</h3>
-      <div id="campaign-list" class="list"><div class="empty">加载中...</div></div>
-    </div>
-  </section>
-
-  <section id="tab-leads" class="panel">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:10px">
-      <div>
-        <h3 style="font-size:17px">合作工单</h3>
-        <div class="muted" style="margin-top:4px">系统自动识别有合作意向（interested / need_followup）的达人回信后生成工单，请人工跟进对接。</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3>联系人列表</h3>
+        <button class="danger small" onclick="deleteAllContacts()">全部删除</button>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <label style="margin:0;font-size:12px;color:#94a3b8">筛选状态:</label>
-        <select id="lead-filter" onchange="loadLeads()" style="width:auto;padding:6px 10px;margin:0">
-          <option value="">全部</option>
-          <option value="new">待跟进</option>
-          <option value="in_progress">跟进中</option>
-          <option value="done">已完成</option>
-        </select>
-        <button class="danger small" onclick="deleteAllLeads()">清空工单</button>
-      </div>
-    </div>
-    <div id="lead-list" class="list"><div class="empty">加载中...</div></div>
-  </section>
-
-  <section id="tab-inbox" class="panel">
-    <div class="grid">
-      <div class="box">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
-          <h3>回信意图识别结果</h3>
-          <button class="danger small" onclick="deleteAllIntents()">清空记录</button>
-        </div>
-        <div id="intent-list" class="list"><div class="empty">加载中...</div></div>
-      </div>
-      <div class="box">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
-          <h3>线程概览</h3>
-          <button class="danger small" onclick="deleteAllThreads()">清空线程</button>
-        </div>
-        <div id="thread-list" class="list"><div class="empty">加载中...</div></div>
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead><tr><th>ID</th><th>邮箱</th><th>姓名</th><th>语言</th><th>备注</th><th>创建时间</th><th>操作</th></tr></thead>
+          <tbody id="creator-rows"><tr><td colspan="7" class="empty">加载中...</td></tr></tbody>
+        </table>
       </div>
     </div>
   </section>
 
+  <!-- 日志 -->
   <section id="tab-logs" class="panel">
     <div class="box">
-      <h3>运行日志</h3>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <h3>运行日志</h3>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <span class="muted small">仅内存、重启后清空</span>
+          <button class="secondary small" onclick="clearRunLogs()">清空当前日志</button>
+        </div>
+      </div>
       <div id="log-list" class="list"><div class="empty">加载中...</div></div>
     </div>
   </section>
@@ -328,11 +239,8 @@ function showBanner(text,ok=false){const el=document.getElementById('banner');el
 function clearBanner(){const el=document.getElementById('banner');el.className='banner';el.textContent='';}
 async function fetchJson(url,opts={}){
   const res=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});
+  if(!res.ok){const txt=await res.text();throw new Error(txt.slice(0,240)||('HTTP '+res.status));}
   const ct=res.headers.get('content-type')||'';
-  if(!res.ok){
-    const txt=await res.text();
-    throw new Error(txt.slice(0,240)||('HTTP '+res.status));
-  }
   if(!ct.includes('json')) return {};
   return res.json();
 }
@@ -356,402 +264,239 @@ function switchTab(name,btn){
 function splitList(text){
   return String(text||'').split(',').map(v=>v.trim()).filter(Boolean);
 }
+
 async function loadStatus(){
   const data=await fetchJson('/status');
   document.getElementById('sum-running').textContent=data.auto_polling?'运行中':'已停止';
-  document.getElementById('sum-creators').textContent=data.summary.creators;
-  document.getElementById('sum-products').textContent=data.summary.products;
-  document.getElementById('sum-campaigns').textContent=data.summary.campaigns;
-  document.getElementById('sum-leads').textContent=data.summary.leads;
-  document.getElementById('sum-intents').textContent=data.summary.intents;
+  const s=data.summary||{};
+  document.getElementById('sum-contacts').textContent=s.contacts??0;
+  document.getElementById('sum-products').textContent=s.products??0;
+  document.getElementById('sum-intents').textContent=s.intents??0;
+  document.getElementById('sum-escalations').textContent=s.escalations??0;
 }
-async function loadCreators(){
-  const data=await fetchJson('/creators');
-  const tbody=document.getElementById('creator-rows');
-  const creatorList=document.getElementById('campaign-creator-list');
-  
-  if(!data.creators.length){
-    tbody.innerHTML='<tr><td colspan="8" class="empty">暂无达人</td></tr>';
-    creatorList.innerHTML='<div class="empty small">暂无达人可选</div>';
-    return;
+
+async function loadInbox(){
+  const [threadsData, intentsData] = await Promise.all([
+    fetchJson('/kols'),
+    fetchJson('/intents?limit=10'),
+  ]);
+
+  // Thread list
+  const threadEl=document.getElementById('thread-list');
+  const threads=threadsData.kols||[];
+  if(!threads.length){threadEl.innerHTML='<div class="empty">暂无线程记录</div>';}
+  else{
+    threadEl.innerHTML=threads.slice(0,30).map(row=>`
+      <div class="item">
+        <div class="item-head">
+          <div>
+            <div><strong>${esc(row.kol_name||row.kol_email)}</strong></div>
+            <div class="muted">${esc(row.kol_email||'')} · ${esc(row.intent_label||'未分析')}</div>
+          </div>
+          <div class="draft-actions" style="margin-top:0">
+            <button class="secondary small" onclick='openThread(${JSON.stringify(row.thread_id)})'>查看线程</button>
+            <button class="danger small" onclick='deleteOneThread(${JSON.stringify(row.thread_id)})'>删除线程</button>
+          </div>
+        </div>
+        <div class="muted" style="margin-top:4px">${esc(row.notes||'')}</div>
+        <div class="muted" style="margin-top:2px">最后更新: ${esc((row.updated_at||'').slice(0,16))}</div>
+      </div>
+    `).join('');
   }
-  
-  creatorList.innerHTML=data.creators.map(c=>{
-    const sent = !!(c.last_outreach_at && String(c.last_outreach_at).trim());
-    return `
-    <div class="creator-cb-row" data-sent="${sent?'1':'0'}">
-      <input type="checkbox" class="creator-cb" value="${c.id}" id="cb-creator-${c.id}">
-      <label class="creator-cb-label" for="cb-creator-${c.id}">
-        <span class="cr-line">
-          <span class="pill ${sent?'outreach-sent':'outreach-unsent'}">${sent?'已发送':'未发送'}</span>
-          <strong>${esc(c.name||c.email)}</strong>
-          <span class="muted" style="font-size:12px;">${esc(c.platform||'未填平台')}</span>
-        </span>
-      </label>
-    </div>
-  `;
-  }).join('');
-  
-  tbody.innerHTML=data.creators.map(row=>`<tr>
-    <td>${row.id}</td>
-    <td>${esc(row.email)}</td>
-    <td>${esc(row.name||'')}</td>
-    <td>${esc(row.platform||'')}</td>
-    <td>${esc((row.tags||[]).join(', '))}</td>
-    <td>${esc(row.collaboration_status||'new')}</td>
-    <td>${esc(row.notes||'')}</td>
-    <td>
-      <button class="secondary small" onclick='editCreator(${JSON.stringify(row)})'>编辑</button>
-      <button class="danger small" onclick='deleteCreator(${JSON.stringify(row.id)})'>删除</button>
-    </td>
+
+  // Intent preview (latest 5)
+  const previewEl=document.getElementById('intent-preview');
+  const intents=intentsData.intents||[];
+  if(!intents.length){previewEl.innerHTML='<div class="empty">暂无识别记录</div>';}
+  else{
+    previewEl.innerHTML=intents.slice(0,5).map(row=>`
+      <div class="item">
+        <div class="item-head">
+          <div>
+            <strong>${esc(row.creator_name||row.creator_email||'未知')}</strong>
+            <div class="muted" style="margin-top:2px">${esc(row.summary||'')}</div>
+          </div>
+          <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+            <span class="pill ${esc(row.cs_sentiment||'neutral')}">${esc(row.cs_sentiment||'neutral')}</span>
+            <span class="pill ${esc(row.cs_tone||'cooperative')}">${esc(row.cs_tone||'cooperative')}</span>
+            ${row.escalated?'<span class="pill escalated">已升级</span>':''}
+            <button class="danger small" title="删除本条流水" onclick='deleteOneIntent(${row.id})'>删除</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+}
+
+async function openThread(threadId){
+  const data=await fetchJson('/thread/'+encodeURIComponent(threadId));
+  const text=(data.messages||[]).map(m=>`${m.role==='our'?'客服':'用户'} | ${(m.subject||'').slice(0,60)}\n${m.body||''}`).join('\n\n----------------\n\n');
+  alert(text||'暂无线程消息');
+}
+
+async function deleteOneThread(threadId){
+  if(!confirm('将删除该线程：对话历史、线程状态、该线程的已处理去重记录，及与该线程关联的情绪流水等。确认？')) return;
+  const result=await api('DELETE','/thread/'+encodeURIComponent(threadId));
+  showBanner(`已删除，影响约 ${result.deleted_rows??0} 行数据`,true);
+}
+
+async function deleteAllThreads(){
+  if(!confirm('将清空线程状态、对话记录、已处理邮件去重（再次拉取同一封邮件将重新处理）。确认？')) return;
+  const result=await api('DELETE','/threads');
+  const tm=result.thread_messages??0;
+  const pm=result.processed_messages??0;
+  const kt=result.kol_threads??0;
+  showBanner(`线程已清空：对话 ${tm} 条、去重 ${pm} 条、线程 ${kt} 条`,true);
+}
+
+async function loadEscalations(){
+  const data=await fetchJson('/escalations?limit=100');
+  const tbody=document.getElementById('escalation-rows');
+  const rows=data.escalations||[];
+  if(!rows.length){tbody.innerHTML='<tr><td colspan="7" class="empty">暂无升级记录</td></tr>';return;}
+  tbody.innerHTML=rows.map(row=>`<tr>
+    <td class="muted">${esc((row.sent_at||'').slice(0,16))}</td>
+    <td class="muted" style="font-size:11px;word-break:break-all;max-width:180px">${esc((row.thread_id||'').slice(0,60))}</td>
+    <td>${esc(row.creator_name||'')} <span class="muted">${esc(row.creator_email||'')}</span></td>
+    <td>${esc(row.product_name||'未绑定')}</td>
+    <td class="small">${esc(row.reason||'')}</td>
+    <td class="muted small">${esc(row.internal_email_to||'')}</td>
+    <td><button class="danger small" onclick="deleteOneEscalation(${row.id})">删除</button></td>
   </tr>`).join('');
 }
-function editCreator(row){
-  document.getElementById('creator-email').value=row.email||'';
-  document.getElementById('creator-name').value=row.name||'';
-  document.getElementById('creator-platform').value=row.platform||'';
-  document.getElementById('creator-country').value=[row.country,row.language].filter(Boolean).join(' / ');
-  document.getElementById('creator-tags').value=(row.tags||[]).join(', ');
-  document.getElementById('creator-summary').value=row.identity_summary||row.notes||'';
-  document.getElementById('creator-email').dataset.editId=row.id;
+
+async function loadIntents(){
+  const data=await fetchJson('/intents?limit=100');
+  const tbody=document.getElementById('intent-rows');
+  const rows=data.intents||[];
+  if(!rows.length){tbody.innerHTML='<tr><td colspan="7" class="empty">暂无记录</td></tr>';return;}
+  tbody.innerHTML=rows.map(row=>`<tr>
+    <td class="muted">${esc((row.created_at||'').slice(0,16))}</td>
+    <td>${esc(row.creator_name||'')} <span class="muted">${esc(row.creator_email||'')}</span></td>
+    <td><span class="pill ${esc(row.cs_sentiment||'neutral')}">${esc(row.cs_sentiment||'neutral')}</span></td>
+    <td><span class="pill ${esc(row.cs_tone||'cooperative')}">${esc(row.cs_tone||'cooperative')}</span></td>
+    <td>${row.escalated?'<span class="pill escalated">已升级</span>':'<span class="pill not-escalated">否</span>'}</td>
+    <td class="small muted">${esc(row.summary||'')}</td>
+    <td><button class="danger small" onclick="deleteOneIntent(${row.id})">删除</button></td>
+  </tr>`).join('');
 }
-async function saveCreator(){
-  const countryRaw=document.getElementById('creator-country').value;
-  const [country='',language='']=countryRaw.split('/').map(v=>v.trim());
-  const payload={
-    email:document.getElementById('creator-email').value,
-    name:document.getElementById('creator-name').value,
-    platform:document.getElementById('creator-platform').value,
-    country,country_raw:countryRaw,language,
-    tags:splitList(document.getElementById('creator-tags').value),
-    identity_summary:document.getElementById('creator-summary').value,
-  };
-  const editId=document.getElementById('creator-email').dataset.editId;
-  if(editId){
-    await api('PUT','/creators/'+editId,payload);
-    delete document.getElementById('creator-email').dataset.editId;
-  }else{
-    await api('POST','/creators',payload);
-  }
-  ['creator-email','creator-name','creator-platform','creator-country','creator-tags','creator-summary'].forEach(id=>document.getElementById(id).value='');
-}
-async function deleteCreator(id){
-  if(!confirm('确认删除达人 '+id+' ?')) return;
-  await api('DELETE','/creators/'+encodeURIComponent(id));
-}
-async function deleteAllCreators(){
-  if(!confirm('危险操作：确认清空所有达人数据吗？')) return;
-  const result = await api('DELETE','/creators');
-  showBanner(`已清空 ${result.deleted_count||0} 条达人数据`, true);
-}
-async function deleteAllLeads(){
-  if(!confirm('危险操作：确认清空所有合作工单吗？')) return;
-  const result = await api('DELETE','/leads');
-  showBanner(`已清空 ${result.deleted_count||0} 条工单`, true);
-}
+
 async function deleteAllIntents(){
-  if(!confirm('确认清空所有回信识别记录吗？')) return;
-  const result = await api('DELETE','/intents');
-  showBanner(`已清空 ${result.deleted_count||0} 条识别记录`, true);
+  if(!confirm('确认清空所有情绪识别记录吗？')) return;
+  const result=await api('DELETE','/intents');
+  showBanner(`已清空 ${result.deleted_count||0} 条记录`,true);
 }
-async function deleteAllThreads(){
-  if(!confirm('将清空：线程状态、多轮对话记录、已处理邮件去重表（之后同一封未读可再次进入处理）。不删除外呼/工单/达人/产品。确认？')) return;
-  const result = await api('DELETE','/threads');
-  const tm = result.thread_messages ?? 0;
-  const pm = result.processed_messages ?? 0;
-  const kt = result.kol_threads ?? 0;
-  showBanner(`线程已清空：对话 ${tm} 条、去重 ${pm} 条、线程 ${kt} 条`, true);
+
+async function deleteOneIntent(id){
+  if(!confirm('确认删除该条情绪流水记录？')) return;
+  await api('DELETE','/intents/'+encodeURIComponent(id));
 }
-async function importCreators(){
-  let csvText=document.getElementById('creator-csv').value.trim();
-  const file=document.getElementById('creator-file').files[0];
-  if(!csvText && file){
-    csvText=await file.text();
-  }
-  if(!csvText){showBanner('请先粘贴或选择 CSV 文件');return;}
-  const result=await api('POST','/creators/import-csv',{csv_text:csvText});
-  showBanner(`导入完成：新增 ${result.created||0}，更新 ${result.updated||0}，错误 ${result.errors?.length||0}`,true);
-  document.getElementById('creator-csv').value='';
-  document.getElementById('creator-file').value='';
+
+async function deleteOneEscalation(id){
+  if(!confirm('确认删除该条升级记录？（不影响已发邮件，仅从列表移除）')) return;
+  await api('DELETE','/escalations/'+encodeURIComponent(id));
 }
+
+async function deleteAllEscalations(){
+  if(!confirm('确认清空所有升级事件记录？')) return;
+  const result=await api('DELETE','/escalations');
+  showBanner(`已清空 ${result.deleted_count??0} 条升级记录`,true);
+}
+
 async function loadProducts(){
   const data=await fetchJson('/products');
   const tbody=document.getElementById('product-rows');
-  const select=document.getElementById('campaign-product');
-  select.innerHTML='<option value="">自动推荐产品</option>'+data.products.map(p=>`<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.id)})</option>`).join('');
-  if(!data.products.length){tbody.innerHTML='<tr><td colspan="7" class="empty">暂无产品</td></tr>';return;}
+  if(!data.products.length){tbody.innerHTML='<tr><td colspan="6" class="empty">暂无产品</td></tr>';return;}
   tbody.innerHTML=data.products.map(p=>`<tr>
     <td>${esc(p.id)}</td>
     <td>${esc(p.name)}</td>
-    <td>${esc(p.store_name||'')}</td>
-    <td>${esc(p.asin||'')}</td>
-    <td>${esc(p.commission_rate)}%</td>
-    <td>${esc((p.keywords||[]).join(', '))}</td>
+    <td>${esc(p.owner_name||'—')}</td>
+    <td class="muted small">${esc(p.owner_email||'—')}</td>
+    <td class="small">${esc((p.keywords||[]).slice(0,4).join(', '))}</td>
     <td>
       <button class="secondary small" onclick='prefillProduct(${JSON.stringify(p)})'>编辑</button>
       <button class="danger small" onclick='deleteProduct(${JSON.stringify(p.id)})'>删除</button>
     </td>
   </tr>`).join('');
 }
+
 function prefillProduct(p){
   document.getElementById('product-id').value=p.id||'';
   document.getElementById('product-name').value=p.name||'';
-  document.getElementById('product-store').value=p.store_name||'';
-  document.getElementById('product-asin').value=p.asin||'';
-  document.getElementById('product-commission').value=p.commission_rate||'';
-  document.getElementById('product-keywords').value=(p.keywords||[]).join(', ');
+  document.getElementById('product-owner-name').value=p.owner_name||'';
+  document.getElementById('product-owner-email').value=p.owner_email||'';
+  document.getElementById('product-fallback-email').value=p.fallback_owner_email||'';
   document.getElementById('product-tagline').value=p.tagline||'';
+  document.getElementById('product-keywords').value=(p.keywords||[]).join(', ');
   document.getElementById('product-desc').value=p.description||p.intro||'';
 }
+
 async function saveProduct(){
   await api('POST','/products',{
     id:document.getElementById('product-id').value,
     name:document.getElementById('product-name').value,
-    store_name:document.getElementById('product-store').value,
-    asin:document.getElementById('product-asin').value,
-    commission_rate:document.getElementById('product-commission').value,
-    keywords:splitList(document.getElementById('product-keywords').value),
+    owner_name:document.getElementById('product-owner-name').value,
+    owner_email:document.getElementById('product-owner-email').value,
+    fallback_owner_email:document.getElementById('product-fallback-email').value,
     tagline:document.getElementById('product-tagline').value,
+    keywords:splitList(document.getElementById('product-keywords').value),
     description:document.getElementById('product-desc').value,
+    is_active:true,
   });
 }
+
 async function deleteProduct(id){
   if(!confirm('确认删除产品 '+id+' ?')) return;
   await api('DELETE','/products/'+encodeURIComponent(id));
 }
-function selectAllCreators(checked) {
-  document.querySelectorAll('#campaign-creator-list .creator-cb').forEach(cb => { cb.checked = checked; });
+
+async function deleteAllProducts(){
+  if(!confirm('危险：将删除产品库中全部产品，升级路由可能依赖默认负责人。开发环境常用。确定？')) return;
+  const result=await api('DELETE','/products');
+  showBanner(`已删除 ${result.deleted_count??0} 个产品`,true);
 }
-function selectCreatorsBySent(sent) {
-  document.querySelectorAll('#campaign-creator-list .creator-cb-row').forEach(row => {
-    const cb = row.querySelector('.creator-cb');
-    if (!cb) return;
-    const want = sent ? '1' : '0';
-    cb.checked = row.getAttribute('data-sent') === want;
+
+async function loadContacts(){
+  const data=await fetchJson('/creators');
+  const tbody=document.getElementById('creator-rows');
+  const contacts=data.contacts||data.creators||[];
+  if(!contacts.length){tbody.innerHTML='<tr><td colspan="7" class="empty">暂无联系人</td></tr>';return;}
+  tbody.innerHTML=contacts.map(row=>`<tr>
+    <td>${row.id}</td>
+    <td>${esc(row.email)}</td>
+    <td>${esc(row.name||'')}</td>
+    <td>${esc(row.language||row.country||'')}</td>
+    <td>${esc(row.notes||'')}</td>
+    <td class="muted">${esc((row.created_at||'').slice(0,10))}</td>
+    <td>
+      <button class="danger small" onclick='deleteContact(${JSON.stringify(row.id)})'>删除</button>
+    </td>
+  </tr>`).join('');
+}
+
+async function saveCreator(){
+  await api('POST','/creators',{
+    email:document.getElementById('creator-email').value,
+    name:document.getElementById('creator-name').value,
+    language:document.getElementById('creator-language').value,
+    notes:document.getElementById('creator-notes').value,
   });
+  ['creator-email','creator-name','creator-language','creator-notes'].forEach(id=>document.getElementById(id).value='');
 }
-function invertCreatorSelection() {
-  document.querySelectorAll('#campaign-creator-list .creator-cb').forEach(cb => { cb.checked = !cb.checked; });
+
+async function deleteContact(id){
+  if(!confirm('确认删除联系人 '+id+' ?')) return;
+  await api('DELETE','/creators/'+encodeURIComponent(id));
 }
-function _campaignBulkN() {
-  const el = document.getElementById('campaign-first-n');
-  const n = el ? parseInt(el.value, 10) : 50;
-  return Math.max(1, isNaN(n) ? 50 : n);
+
+async function deleteAllContacts(){
+  if(!confirm('危险操作：确认清空所有联系人数据吗？')) return;
+  const result=await api('DELETE','/creators');
+  showBanner(`已清空 ${result.deleted_count||0} 条联系人数据`,true);
 }
-function selectCreatorsFirstN() {
-  const n = _campaignBulkN();
-  const boxes = document.querySelectorAll('#campaign-creator-list .creator-cb');
-  boxes.forEach((cb, i) => { cb.checked = i < n; });
-}
-function selectNextUnselectedN() {
-  const n = _campaignBulkN();
-  let added = 0;
-  document.querySelectorAll('#campaign-creator-list .creator-cb').forEach(cb => {
-    if (added >= n) return;
-    if (!cb.checked) { cb.checked = true; added++; }
-  });
-}
-async function createCampaign(){
-  const btn = event.currentTarget;
-  const originalText = btn.textContent;
-  btn.textContent = '生成中 (可能需要几分钟)...';
-  btn.disabled = true;
-  try {
-    const creatorIds = Array.from(document.querySelectorAll('#campaign-creator-list .creator-cb:checked')).map(cb => Number(cb.value));
-    await api('POST','/campaigns/draft',{
-      name:document.getElementById('campaign-name').value,
-      product_id:document.getElementById('campaign-product').value,
-      commission_rate:document.getElementById('campaign-commission').value || null,
-      creator_ids:creatorIds.length?creatorIds:null,
-    });
-  } finally {
-    btn.textContent = originalText;
-    btn.disabled = false;
-  }
-}
-async function deleteCampaign(id){
-  if(!confirm('危险：确认删除该外呼批次及其所有草稿吗？')) return;
-  await api('DELETE','/campaigns/'+id);
-}
-async function saveDraft(id){
-  const subject=document.getElementById('draft-subject-'+id).value;
-  const body=document.getElementById('draft-body-'+id).value;
-  await api('PUT','/outreach/'+id,{subject,body});
-}
-function toggleDraft(id) {
-  const el = document.getElementById('draft-editor-' + id);
-  if (!el) return;
-  if (el.style.display === 'none') {
-    el.style.display = 'block';
-  } else {
-    el.style.display = 'none';
-  }
-}
-async function deleteDraft(id) {
-  if(!confirm('确认删除此草稿吗？')) return;
-  await api('DELETE','/outreach/'+id);
-}
-async function sendDraft(id){
-  const btn = event.currentTarget;
-  const originalText = btn.textContent;
-  btn.textContent = '发送中...';
-  btn.disabled = true;
-  try {
-    await api('POST','/outreach/'+id+'/send');
-  } finally {
-    btn.textContent = originalText;
-    btn.disabled = false;
-  }
-}
-async function sendCampaign(id, count){
-  if(count === 0) {
-    showBanner('没有可发送的草稿', false);
-    return;
-  }
-  if(!confirm(`确认发送此批次的 ${count} 封未发送邮件吗？`)) return;
-  const btn = event.currentTarget;
-  const originalText = btn.textContent;
-  btn.textContent = '发送中...';
-  btn.disabled = true;
-  try {
-    await api('POST','/campaigns/'+id+'/send');
-  } finally {
-    btn.textContent = originalText;
-    btn.disabled = false;
-  }
-}
-async function loadCampaigns(){
-  const data=await fetchJson('/campaigns');
-  const el=document.getElementById('campaign-list');
-  if(!data.campaigns.length){el.innerHTML='<div class="empty">暂无外呼批次</div>';return;}
-  el.innerHTML=data.campaigns.map(c=>{
-    const unsentCount = (c.messages||[]).filter(m => m.status !== 'sent').length;
-    return `
-    <div class="item">
-      <div class="item-head">
-        <div>
-          <div><strong>${esc(c.name)}</strong> <span class="pill">${esc(c.status)}</span></div>
-          <div class="muted">批次 ID: ${c.id} · 绑定产品: ${esc(c.product_id||'自动推荐')} · 达人数量: ${c.creator_count||0}</div>
-        </div>
-        <div class="draft-actions">
-          <button class="success" onclick="sendCampaign(${c.id}, ${unsentCount})" ${unsentCount===0?'disabled style="opacity:0.5;cursor:not-allowed"':''}>整批发送 (${unsentCount} 封未发送)</button>
-          <button class="danger" onclick="deleteCampaign(${c.id})">删除此批次</button>
-        </div>
-      </div>
-      ${(c.messages||[]).map(m=>`
-        <div class="box" style="margin-top:12px; padding:12px;">
-          <div class="item-head" style="align-items:center;">
-            <div>
-              <div style="font-size:14px;"><strong>${esc(m.creator_name||m.creator_email||'未知')}</strong> <span class="muted">${esc(m.creator_email||'')}</span></div>
-              <div class="muted" style="font-size:12px; margin-top:4px;">
-                状态: <span class="pill" style="font-size:11px; padding:2px 6px; background:${m.status==='sent'?'#14532d':'#1e293b'}; color:${m.status==='sent'?'#86efac':''}">${esc(m.status||'draft')}</span> 
-                · 产品: ${esc(m.product_name||m.product_id||'自动分配')}
-              </div>
-            </div>
-            <div class="draft-actions">
-              <button class="secondary small" onclick="toggleDraft(${m.id})">${m.status === 'sent' ? '查看详情' : '编辑草稿'}</button>
-              ${m.status === 'sent' ? '' : `<button class="success small" onclick="sendDraft(${m.id})">发送此条</button>`}
-              ${m.status === 'sent' ? '' : `<button class="danger small" onclick="deleteDraft(${m.id})">删除此条</button>`}
-            </div>
-          </div>
-          <div id="draft-editor-${m.id}" style="display:none; margin-top:12px; border-top:1px solid #1f2937; padding-top:12px;">
-            <label>主题</label>
-            <input id="draft-subject-${m.id}" value="${esc(m.subject||'')}" ${m.status==='sent'?'disabled':''}>
-            <label>正文</label>
-            <textarea id="draft-body-${m.id}" style="min-height:150px" ${m.status==='sent'?'disabled':''}>${esc(m.body||'')}</textarea>
-            ${m.status === 'sent' ? '' : `
-            <div style="text-align:right">
-              <button class="secondary small" onclick="saveDraft(${m.id})">保存修改</button>
-            </div>
-            `}
-          </div>
-        </div>
-      `).join('')}
-    </div>
-  `}).join('');
-}
-const STATUS_LABELS={new:'待跟进',in_progress:'跟进中',done:'已完成'};
-const INTENT_LABELS={interested:'确认合作',need_followup:'有意向·待确认'};
-async function patchTicketStatus(id,status){
-  try{
-    await fetchJson('/leads/'+id+'/status',{method:'PATCH',body:JSON.stringify({status})});
-    await loadLeads();
-    await loadStatus();
-  }catch(err){showBanner('状态更新失败: '+err.message);}
-}
-async function loadLeads(){
-  const data=await fetchJson('/leads');
-  const el=document.getElementById('lead-list');
-  const filterVal=document.getElementById('lead-filter').value;
-  let leads=data.leads||[];
-  if(filterVal) leads=leads.filter(r=>r.status===filterVal);
-  if(!leads.length){el.innerHTML='<div class="empty">暂无工单</div>';return;}
-  el.innerHTML=leads.map(row=>{
-    const intentLabel=INTENT_LABELS[row.intent]||row.intent||'';
-    const statusLabel=STATUS_LABELS[row.status]||row.status||'new';
-    const nextActions=[];
-    if(row.status==='new') nextActions.push(`<button class="warn small" onclick="patchTicketStatus(${row.id},'in_progress')">开始跟进</button>`);
-    if(row.status==='in_progress') nextActions.push(`<button class="success small" onclick="patchTicketStatus(${row.id},'done')">标记完成</button>`);
-    if(row.status!=='new') nextActions.push(`<button class="secondary small" onclick="patchTicketStatus(${row.id},'new')">重置</button>`);
-    return `<div class="ticket-card intent-${esc(row.intent||'')}">
-      <div class="item-head">
-        <div>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <strong>${esc(row.creator_name||'未知达人')}</strong>
-            <span class="pill ${esc(row.intent||'')}">${esc(intentLabel)}</span>
-            <span class="pill status-${esc(row.status||'new')}">${esc(statusLabel)}</span>
-          </div>
-          <div class="muted" style="margin-top:4px">${esc(row.creator_email||'')} · ${esc(row.platform||'')} · 产品: ${esc(row.product_name||'')} · 批次: ${esc(row.campaign_name||'')}</div>
-        </div>
-        <div class="draft-actions">${nextActions.join('')}</div>
-      </div>
-      ${row.intent_summary?`<div class="small" style="margin-top:8px;color:#cbd5e1">摘要: ${esc(row.intent_summary)}</div>`:''}
-      ${row.latest_message?`<div class="small" style="margin-top:6px;color:#94a3b8;white-space:pre-wrap;max-height:80px;overflow:hidden">达人回信: ${esc(row.latest_message.slice(0,200))}${row.latest_message.length>200?'…':''}</div>`:''}
-      <div class="muted" style="margin-top:6px">更新时间: ${esc((row.updated_at||'').slice(0,16))}</div>
-    </div>`;
-  }).join('');
-}
-async function openThread(threadId){
-  const data=await fetchJson('/thread/'+encodeURIComponent(threadId));
-  const text=(data.messages||[]).map(m=>`${m.role==='our'?'我方':'达人'} | ${(m.subject||'').slice(0,60)}\n${m.body||''}`).join('\n\n----------------\n\n');
-  alert(text||'暂无线程消息');
-}
-async function loadInbox(){
-  const intents=await fetchJson('/intents?limit=50');
-  const threads=await fetchJson('/kols');
-  const intentEl=document.getElementById('intent-list');
-  const threadEl=document.getElementById('thread-list');
-  if(!intents.intents.length){intentEl.innerHTML='<div class="empty">暂无回信识别结果</div>';}else{
-    intentEl.innerHTML=intents.intents.map(row=>`
-      <div class="item">
-        <div class="item-head">
-          <div>
-            <div><strong>${esc(row.creator_name||row.creator_email||'未知达人')}</strong></div>
-            <div class="muted">${esc(row.summary||'')}</div>
-          </div>
-          <span class="pill ${esc(row.intent)}">${esc(row.intent)}</span>
-        </div>
-        ${row.suggested_reply?`<div class="muted" style="margin-top:8px">建议回复：${esc(row.suggested_reply)}</div>`:''}
-      </div>
-    `).join('');
-  }
-  if(!threads.kols.length){threadEl.innerHTML='<div class="empty">暂无线程</div>';}else{
-    threadEl.innerHTML=threads.kols.map(row=>`
-      <div class="item">
-        <div class="item-head">
-          <div>
-            <div><strong>${esc(row.kol_name||row.kol_email)}</strong></div>
-            <div class="muted">${esc(row.kol_email||'')} · ${esc(row.intent_label||'未识别')}</div>
-          </div>
-          <button class="secondary small" onclick='openThread(${JSON.stringify(row.thread_id)})'>查看线程</button>
-        </div>
-        <div class="muted">${esc(row.notes||'')}</div>
-      </div>
-    `).join('');
-  }
-}
+
 async function loadLogs(){
-  const data=await fetchJson('/logs?tail=80');
+  const data=await fetchJson('/logs?tail=200');
   const el=document.getElementById('log-list');
   if(!data.logs.length){el.innerHTML='<div class="empty">暂无日志</div>';return;}
   el.innerHTML=[...data.logs].reverse().map(row=>`
@@ -761,15 +506,23 @@ async function loadLogs(){
     </div>
   `).join('');
 }
+
+async function clearRunLogs(){
+  if(!confirm('清空当前进程内存中的运行日志？（不删数据库，重启后仍会重新产生日志）')) return;
+  const result=await api('DELETE','/logs');
+  showBanner(`已清空 ${result.cleared_count??0} 条内存日志`,true);
+}
+
 async function loadAll(){
   try{
     await loadStatus();
-    await Promise.all([loadCreators(),loadProducts(),loadCampaigns(),loadLeads(),loadInbox(),loadLogs()]);
+    await Promise.all([loadInbox(),loadEscalations(),loadIntents(),loadProducts(),loadContacts(),loadLogs()]);
     clearBanner();
   }catch(err){
     showBanner('加载失败: '+err.message,false);
   }
 }
+
 loadAll();
 setInterval(()=>loadStatus().catch(()=>{}),5000);
 setInterval(()=>loadLogs().catch(()=>{}),6000);

@@ -1,19 +1,15 @@
 """
-mail_service.py — 阿里企业邮箱 IMAP 收件 + SMTP 发件
+mail_service.py — 阿里企业邮箱 IMAP 收件 + SMTP 发件（客服场景）
 
-防 Spam 核心设计（解决 Gmail 将回复判为垃圾邮件的根本原因）：
-─────────────────────────────────────────────────────────────
-Gmail 将邮件判为 Spam 通常有以下原因：
-  A. 内容触发词        → 由 LLM 层保证不出现高危词汇
-  B. 无法识别为合法回复 → 通过 In-Reply-To + References 头部解决
-  C. 邮件格式可疑       → 通过 multipart/alternative + 真实头部解决
+功能：
+  1. fetch_unread_emails()        IMAP 拉取未读来信
+  2. send_reply()                 回复用户邮件（可 Cc 负责人；Thread 串联，防 Spam 头部）
+  3. send_internal_escalation()   向产品负责人发送内部升级通知邮件（含用户原文 + 中译）
 
-关键设计：
-  1. In-Reply-To + References：串联 Thread，Gmail 识别为合法会话回复
-  2. multipart/alternative：同时发送 HTML + 纯文本，与真实商务邮件格式一致
-  3. Auto-Submitted: no：告知 Gmail 这是人工发送的回复，非批量自动化邮件
-  4. X-Mailer: Microsoft Outlook 16.0：消除 Python email 库的自动化指纹
-─────────────────────────────────────────────────────────────
+防 Spam 设计：
+  - In-Reply-To + References 串联 Thread
+  - multipart/alternative 双格式
+  - X-Mailer 消除自动化指纹
 """
 
 import logging
@@ -143,6 +139,7 @@ def fetch_unread_emails(limit: int = 20) -> list[dict]:
 def send_reply(
     original: dict,
     reply_body: str,
+    cc_emails: list[str] | None = None,
 ) -> bool:
     """
     通过阿里企业邮箱 SMTP 发送回复邮件。
@@ -159,6 +156,7 @@ def send_reply(
     Args:
         original:   由 fetch_unread_emails() 返回的原邮件字典
         reply_body: 纯文本回复正文
+        cc_emails:  抄送地址列表（如产品负责人）
 
     Returns:
         bool: 发送成功返回 True
@@ -183,6 +181,10 @@ def send_reply(
 
         # To: 保留原始收件人格式（含显示名）
         msg["To"] = original["from_raw"] or to_email
+
+        cc_list = [e.strip() for e in (cc_emails or []) if e and str(e).strip()]
+        if cc_list:
+            msg["Cc"] = ", ".join(cc_list)
 
         msg["Subject"]    = reply_subject
         msg["Date"]       = formatdate(localtime=True)
@@ -209,7 +211,8 @@ def send_reply(
         msg.attach(html_part)
 
         # ── SSL 连接并发送 ─────────────────────────────────────────────────
-        logger.info(f"📤 发送回复 → {to_email} | 主题: {reply_subject}")
+        log_cc = f" | Cc: {cc_list}" if cc_list else ""
+        logger.info(f"📤 发送回复 → {to_email}{log_cc} | 主题: {reply_subject}")
         logger.info(f"   In-Reply-To: {orig_msg_id[:60]}")
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=context) as server:
@@ -224,69 +227,96 @@ def send_reply(
         return False
 
 
-def send_outreach_email(
+def send_internal_escalation(
     *,
     to_email: str,
     to_name: str,
-    subject: str,
-    body: str,
-) -> dict:
+    thread_id: str,
+    contact_name: str,
+    contact_email: str,
+    product_name: str,
+    priority: str,
+    escalation_summary: str,
+    original_message: str = "",
+    original_message_zh: str = "",
+) -> bool:
     """
-    发送主动首封开发邮件。
+    向产品负责人发送内部客服升级通知邮件。
 
-    返回:
-      {
-        "success": bool,
-        "message_id": str,
-        "thread_id": str,
-        "sent_at": str
-      }
+    Args:
+        to_email:              收件人邮箱（产品 owner_email 或 DEFAULT_SUPPORT_OWNER_EMAIL）
+        to_name:               收件人姓名
+        thread_id:             线程 ID
+        contact_name:          触发升级的联系人姓名
+        contact_email:         触发升级的联系人邮箱
+        product_name:          绑定产品名称
+        priority:              优先级建议（如 high / medium）
+        escalation_summary:    由 LLM 生成的 ≤5 行摘要
+        original_message:      用户来信原文（任意语种，节选）
+        original_message_zh:   原文的简体中文完整译文，供内部客服阅读
+
+    Returns:
+        bool: 发送成功返回 True
     """
-    message_id = make_msgid(domain=config.EMAIL_ADDRESS.split("@")[-1])
-    sent_at = datetime.now().isoformat()
-    sender_domain = config.EMAIL_ADDRESS.split("@")[-1]
     try:
+        subject = f"[客服升级] {contact_name} — {product_name}"
+        orig = (original_message or "").strip()
+        orig_zh = (original_message_zh or "").strip()
+        if orig and orig_zh:
+            original_block = (
+                f"【用户原文】\n{orig}\n\n"
+                f"【中文译文】（供内部阅读）\n{orig_zh}\n"
+            )
+        elif orig:
+            original_block = (
+                f"【用户原文】\n{orig}\n\n"
+                f"【中文译文】\n"
+                f"（系统暂未能自动生成译文，请根据上方原文处理。）\n"
+            )
+        else:
+            original_block = ""
+
+        body = (
+            f"【客服升级通知】\n\n"
+            f"以下工单需要您的关注：\n\n"
+            f"{escalation_summary}\n\n"
+        )
+        if original_block:
+            body += f"---\n{original_block}\n---\n"
+        body += (
+            f"线程 ID：{thread_id}\n"
+            f"联系人邮箱：{contact_email}\n"
+            f"优先级建议：{priority}\n"
+            f"品牌：{config.BRAND_NAME}\n\n"
+            f"请尽快与该联系人跟进处理。\n\n"
+            f"{config.BRAND_SIGNATURE}"
+        )
+
         msg = MIMEMultipart("alternative", boundary=_outlook_boundary())
         msg["From"] = formataddr((config.SENDER_DISPLAY_NAME, config.EMAIL_ADDRESS))
         msg["To"] = formataddr((to_name or to_email, to_email))
         msg["Subject"] = subject
         msg["Date"] = formatdate(localtime=True)
-        msg["Message-ID"] = message_id
-        msg["X-Mailer"]   = "Microsoft Outlook 16.0"
+        msg["Message-ID"] = make_msgid(domain=config.EMAIL_ADDRESS.split("@")[-1])
+        msg["X-Mailer"] = "Microsoft Outlook 16.0"
 
-        # List-Unsubscribe 是 Gmail 官方指南要求的商业邮件头部，
-        # 缺少此头部会显著提升被判为促销/垃圾的概率
-        unsubscribe_mailto = f"<mailto:{config.EMAIL_ADDRESS}?subject=unsubscribe>"
-        msg["List-Unsubscribe"] = unsubscribe_mailto
-        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
-
-        body_with_footer = _append_unsubscribe_footer(body, config.EMAIL_ADDRESS)
-        text_part = MIMEText(body_with_footer, "plain", _UTF8_QP)
-        html_part = MIMEText(_text_to_html(body_with_footer, config.SENDER_DISPLAY_NAME), "html", _UTF8_QP)
+        text_part = MIMEText(body, "plain", _UTF8_QP)
+        html_part = MIMEText(_text_to_html(body, config.SENDER_DISPLAY_NAME), "html", _UTF8_QP)
         msg.attach(text_part)
         msg.attach(html_part)
 
-        logger.info(f"📤 发送开发邮件 → {to_email} | 主题: {subject}")
+        logger.info(f"📤 发送内部升级通知 → {to_email} | 主题: {subject}")
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=context) as server:
             server.login(config.EMAIL_ADDRESS, config.EMAIL_PASSWORD)
             server.send_message(msg)
 
-        logger.info(f"✅ 开发邮件发送成功 → {to_email}")
-        return {
-            "success": True,
-            "message_id": message_id,
-            "thread_id": message_id,
-            "sent_at": sent_at,
-        }
+        logger.info(f"✅ 内部升级通知发送成功 → {to_email}")
+        return True
+
     except Exception as exc:
-        logger.error(f"❌ 开发邮件发送失败: {exc}", exc_info=True)
-        return {
-            "success": False,
-            "message_id": message_id,
-            "thread_id": message_id,
-            "sent_at": sent_at,
-        }
+        logger.error(f"❌ 内部升级通知发送失败: {exc}", exc_info=True)
+        return False
 
 
 # ─── HTML 生成辅助 ──────────────────────────────────────────────────────────────
@@ -301,12 +331,6 @@ def _strip_html_tags(text: str) -> str:
     # 修复 LLM 生成的 </p > 等畸形闭合标签产生的多余空格
     text = _re.sub(r'\s{3,}', '\n\n', text)
     return text.strip()
-
-
-def _append_unsubscribe_footer(body: str, reply_email: str) -> str:
-    """在纯文本正文末尾附加一行退订说明（CAN-SPAM 合规）。"""
-    footer = f"\n\n---\nIf you'd prefer not to receive messages like this, reply with 'unsubscribe' and I'll remove you right away."
-    return body.rstrip() + footer
 
 
 def _text_to_html(text: str, sender_name: str) -> str:
