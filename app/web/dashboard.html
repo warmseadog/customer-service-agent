@@ -10,8 +10,11 @@
 h1,h2,h3{margin:0}.top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:18px}
 .hero{max-width:760px}.hero p{color:#94a3b8;line-height:1.6;margin:8px 0 0}
 .controls{display:flex;gap:10px;flex-wrap:wrap}
-button,.btn{background:#6366f1;color:#fff;border:none;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
-button.secondary,.btn.secondary{background:#1e293b;border:1px solid #334155}
+button,.btn{background:#6366f1;color:#fff;border:none;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;transition:all 0.2s ease}
+button:hover,.btn:hover{filter:brightness(1.15);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,0.2)}
+button:active,.btn:active{transform:translateY(0);box-shadow:none;filter:brightness(1)}
+button:disabled,.btn:disabled{opacity:0.6;cursor:not-allowed;transform:none;box-shadow:none;filter:none}
+button.secondary,.btn.secondary{background:#1e293b;border:1px solid #334155;color:#e2e8f0}
 button.warn{background:#f59e0b;color:#111827}button.danger{background:#dc2626}
 button.success{background:#16a34a}
 .banner{display:none;margin-bottom:16px;padding:12px 14px;border-radius:10px;border:1px solid #854d0e;background:#422006;color:#fcd34d}
@@ -26,6 +29,7 @@ button.success{background:#16a34a}
 .box h3{font-size:16px;margin-bottom:12px}
 label{display:block;font-size:12px;color:#94a3b8;margin-bottom:6px}
 input,textarea,select{width:100%;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin-bottom:12px}
+input[readonly]{opacity:0.92;cursor:default}
 input[type=checkbox]{width:auto;max-width:none;margin-bottom:0;vertical-align:middle}
 textarea{min-height:90px;resize:vertical}
 .table-wrap{overflow:auto}.tbl{width:100%;border-collapse:collapse;font-size:13px}
@@ -45,10 +49,37 @@ textarea{min-height:90px;resize:vertical}
 .pill.not-escalated{background:#1e293b;color:#94a3b8}
 .list{display:flex;flex-direction:column;gap:12px}.item{background:#020617;border:1px solid #1f2937;border-radius:14px;padding:14px}
 .item-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.thread-detail-panel{margin-top:12px;padding-top:12px;border-top:1px solid #1f2937;display:none}
+.thread-detail-panel.is-open{display:block}
+.msg-row{margin-bottom:12px;max-width:100%}
+.msg-row .msg-meta{font-size:11px;color:#94a3b8;margin-bottom:6px}
+.msg-row .msg-body{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.55;border-radius:10px;padding:10px 12px}
+.msg-them .msg-body{background:#0f172a;border:1px solid #334155}
+.msg-our .msg-body{background:#1e1b4b;border:1px solid #4338ca}
 .draft-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .small{font-size:12px}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .empty{padding:18px;color:#64748b;text-align:center}
 @media (max-width:960px){.grid,.two-col{grid-template-columns:1fr}}
+.esc-minimal-collapsed{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%}
+.esc-minimal-collapsed .esc-minimal-label{font-size:11px;font-weight:600;color:#94a3b8;letter-spacing:0.02em;flex-shrink:0}
+.esc-minimal-collapsed .secondary.small{padding:4px 10px;font-size:10px;border-radius:6px;flex-shrink:0}
+/* 内部客服页 · 备用收件人（不占右侧独立栏） */
+.esc-settings-card{margin-bottom:16px}
+.esc-settings-card .esc-card-sub{font-size:12px;color:#64748b;line-height:1.45;margin:-4px 0 10px}
+.esc-settings-card .esc-full-panel h3{font-size:14px;color:#e2e8f0;margin:0 0 6px}
+.esc-settings-card .esc-edit-body .grid{grid-template-columns:1fr;gap:0}
+.esc-form-compact{display:flex;flex-direction:column;gap:10px}
+.esc-form-compact .two-col > div > label{margin-bottom:4px}
+.esc-form-compact .two-col > div > input{margin-bottom:0}
+.esc-settings-card .esc-edit-actions{flex-direction:row;flex-wrap:wrap}
+.esc-settings-card .esc-edit-actions button{width:auto;min-width:100px;flex:1}
+.esc-effective-summary{margin:0 0 10px;padding-bottom:10px;border-bottom:1px solid #1f2937}
+.esc-eff-row{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.esc-eff-row:last-child{margin-bottom:0}
+.esc-eff-k{font-size:11px;color:#64748b}
+.esc-eff-v{font-size:13px;font-weight:600;word-break:break-all;line-height:1.4;color:#e2e8f0}
+.esc-edit-actions{display:flex;gap:8px;margin-top:10px}
+.esc-edit-actions button{padding:8px 14px;font-size:13px;border-radius:8px}
 </style>
 </head>
 <body>
@@ -57,40 +88,40 @@ textarea{min-height:90px;resize:vertical}
   <div class="top">
     <div class="hero">
       <h1>客服邮件工作台</h1>
-      <p>自动处理用户来信：情绪分析、安抚回复、升级产品负责人。系统被动接收入站邮件，不发送任何主动外呼。</p>
+      <p>自动处理用户来信：情绪分析、安抚回复、将需跟进内容通知产品负责人。全局 <strong>兜底收件人</strong> 与<strong>可分配负责人名单</strong>请在「内部客服」页配置。系统仅被动接收入站邮件。</p>
     </div>
     <div class="controls">
-      <button class="success" onclick="api('POST','/start-auto')">启动轮询</button>
-      <button class="danger" onclick="api('POST','/stop-auto')">停止轮询</button>
-      <button class="warn" onclick="api('POST','/check')">立即检查来信</button>
-      <button class="secondary" onclick="loadAll()">刷新数据</button>
+      <button class="success" onclick="api('POST','/start-auto',null,this)">启动轮询</button>
+      <button class="danger" onclick="api('POST','/stop-auto',null,this)">停止轮询</button>
+      <button class="warn" onclick="api('POST','/check',null,this)">立即检查来信</button>
+      <button class="secondary" onclick="handleRefresh(this)">刷新数据</button>
     </div>
   </div>
 
   <div class="cards">
     <div class="card"><div class="label">轮询状态</div><div class="value" id="sum-running">-</div></div>
-    <div class="card"><div class="label">联系人数量</div><div class="value" id="sum-contacts">0</div></div>
     <div class="card"><div class="label">产品数量</div><div class="value" id="sum-products">0</div></div>
-    <div class="card"><div class="label">情绪识别流水</div><div class="value" id="sum-intents">0</div></div>
-    <div class="card"><div class="label">升级事件</div><div class="value" id="sum-escalations">0</div></div>
+    <div class="card"><div class="label">内部客服</div><div class="value" id="sum-handlers">0</div></div>
+    <div class="card"><div class="label">客诉分析记录</div><div class="value" id="sum-intents">0</div></div>
+    <div class="card"><div class="label">内部通知</div><div class="value" id="sum-escalations">0</div></div>
   </div>
 
   <div class="tabs">
-    <button class="tab active" onclick="switchTab('inbox',this)">会话/线程</button>
-    <button class="tab" onclick="switchTab('escalations',this)">升级记录</button>
-    <button class="tab" onclick="switchTab('intents',this)">情绪流水</button>
+    <button class="tab active" onclick="switchTab('inbox',this)">客户会话</button>
+    <button class="tab" onclick="switchTab('escalations',this)">内部通知</button>
+    <button class="tab" onclick="switchTab('intents',this)">客诉分析</button>
     <button class="tab" onclick="switchTab('products',this)">产品库</button>
-    <button class="tab" onclick="switchTab('contacts',this)">联系人</button>
+    <button class="tab" onclick="switchTab('internal',this)">内部客服</button>
     <button class="tab" onclick="switchTab('logs',this)">运行日志</button>
   </div>
 
-  <!-- 会话/线程 -->
+  <!-- 客户会话（同一会话 = 同一线程的往来邮件，便于排障的会话 ID 见列表） -->
   <section id="tab-inbox" class="panel active">
     <div class="grid">
       <div class="box">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <h3>线程概览</h3>
-          <button class="danger small" onclick="deleteAllThreads()">清空全部线程</button>
+          <h3>会话概览</h3>
+          <button class="danger small" onclick="deleteAllThreads()">清空全部会话</button>
         </div>
         <div id="thread-list" class="list"><div class="empty">加载中...</div></div>
       </div>
@@ -101,33 +132,33 @@ textarea{min-height:90px;resize:vertical}
     </div>
   </section>
 
-  <!-- 升级记录 -->
+  <!-- 已发给负责人的内部通知（非「客户升级」） -->
   <section id="tab-escalations" class="panel">
     <div class="box">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
-        <h3>升级事件列表</h3>
-        <button class="danger small" onclick="deleteAllEscalations()">清空全部</button>
+        <h3>已发内部通知</h3>
+        <button class="danger small" onclick="deleteAllEscalations()">清空本列表</button>
       </div>
-      <div class="muted" style="margin-bottom:12px">系统判断需要人工介入时，向产品负责人发送内部升级通知邮件并记录于此。</div>
+      <div class="muted" style="margin-bottom:12px">需要人工跟进来信时，系统会按规则给产品负责人/兜底收件人发<strong>内部说明邮件</strong>；本页即这些邮件的留痕（便于对账、排障，不代表已在客户侧展示）。</div>
       <div class="table-wrap">
         <table class="tbl">
-          <thead><tr><th>时间</th><th>线程 ID</th><th>联系人</th><th>产品</th><th>升级原因</th><th>通知发送至</th><th>操作</th></tr></thead>
+          <thead><tr><th>时间</th><th>会话 ID</th><th>客户</th><th>产品</th><th>事由</th><th>通知发送至</th><th>操作</th></tr></thead>
           <tbody id="escalation-rows"><tr><td colspan="7" class="empty">加载中...</td></tr></tbody>
         </table>
       </div>
     </div>
   </section>
 
-  <!-- 情绪流水 -->
+  <!-- 客诉分析 -->
   <section id="tab-intents" class="panel">
     <div class="box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h3>情绪识别流水</h3>
+        <h3>客诉分析记录</h3>
         <button class="danger small" onclick="deleteAllIntents()">清空记录</button>
       </div>
       <div class="table-wrap">
         <table class="tbl">
-          <thead><tr><th>时间</th><th>联系人</th><th>情绪</th><th>语气</th><th>是否升级</th><th>摘要</th><th>操作</th></tr></thead>
+          <thead><tr><th>时间</th><th>客户</th><th>情绪</th><th>语气</th><th>转内部</th><th>摘要</th><th>操作</th></tr></thead>
           <tbody id="intent-rows"><tr><td colspan="7" class="empty">加载中...</td></tr></tbody>
         </table>
       </div>
@@ -139,17 +170,30 @@ textarea{min-height:90px;resize:vertical}
     <div class="grid">
       <div class="box">
         <h3>新增 / 更新产品</h3>
-        <div class="muted" style="margin-bottom:12px">产品负责人（owner）是升级通知的唯一收件人，仅在此处维护（1A）。</div>
+        <div class="muted" style="margin-bottom:12px">产品<strong>负责人</strong>为<strong>内部同事</strong>，用于收<strong>内部通知</strong>。请先在「内部客服」页维护可分配名单，再在此选择；也可选「其他」后手动填写内部邮箱。</div>
         <div class="two-col">
           <div><label>产品 ID *</label><input id="product-id" placeholder="P001 或 ASIN"></div>
           <div><label>产品名称 *</label><input id="product-name" placeholder="产品名称"></div>
         </div>
         <div class="two-col">
-          <div><label>负责人姓名</label><input id="product-owner-name" placeholder="张三"></div>
-          <div><label>负责人邮箱</label><input id="product-owner-email" placeholder="zhangsan@example.com"></div>
+          <div>
+            <label>内部负责人</label>
+            <select id="product-owner-select" onchange="onProductOwnerSelect()">
+              <option value="">— 请选择内部负责人 —</option>
+            </select>
+          </div>
+          <div>
+            <label>内部邮箱（自动带出）</label>
+            <input id="product-owner-email" type="email" readonly placeholder="选择人员后自动填写" autocomplete="off">
+          </div>
         </div>
+        <div class="two-col" id="product-owner-manual" style="display:none">
+          <div><label>姓名（手动）</label><input id="product-owner-name-manual" placeholder="内部同事姓名" autocomplete="off"></div>
+          <div><label>邮箱（手动）</label><input id="product-owner-email-manual" type="email" placeholder="内部企业邮箱" autocomplete="off"></div>
+        </div>
+        <input type="hidden" id="product-owner-name" value="">
         <label>备用负责人邮箱（可选）</label>
-        <input id="product-fallback-email" placeholder="备用联系邮箱">
+        <input id="product-fallback-email" placeholder="另一内部邮箱（负责人缺席时）">
         <div class="two-col">
           <div><label>一句话卖点</label><input id="product-tagline" placeholder="产品核心卖点"></div>
           <div><label>关键词</label><input id="product-keywords" placeholder="home, sleep, fitness"></div>
@@ -161,59 +205,102 @@ textarea{min-height:90px;resize:vertical}
       <div class="box">
         <h3>说明</h3>
         <div class="muted">
-          <strong>产品绑定与负责人（1A）：</strong><br><br>
-          产品库是系统绑定用户来信与产品负责人的唯一数据源。<br><br>
-          • <strong>owner_email</strong>：客服升级事件的首选收件人。<br>
-          • <strong>fallback_owner_email</strong>：owner_email 为空时使用。<br>
-          • 若产品无 owner，系统使用环境变量 <code>DEFAULT_SUPPORT_OWNER_EMAIL</code>。<br><br>
-          修改负责人 = 更新此表单或直接修改数据库。不提供线程级别的负责人切换。
+          <strong>产品绑定与内部负责人：</strong><br><br>
+          负责人=团队内收到<strong>内部通知</strong>的一线同事。请在「内部客服」页统一维护可分配名单，再回到这里绑定产品。<br><br>
+          • <strong>内部邮箱</strong>：有来信匹配到该产品时，系统发内部说明邮件的<strong>主收件人</strong>。<br>
+          • <strong>备用负责人邮箱</strong>：主邮箱为空时尝试使用。<br>
+          • 未匹配到产品等：在 <strong>内部客服</strong> 页配置「全局兜底收件人」路由（团队公共邮箱等）。<br><br>
+          不提供按会话单独改路由；须通过产品与全局收件配置维护。
         </div>
       </div>
     </div>
     <div class="box" style="margin-top:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
-        <h3>产品列表</h3>
+        <div style="display:flex;align-items:center;gap:16px;flex:1">
+          <h3 style="margin:0">产品列表</h3>
+          <input type="text" id="product-search" placeholder="搜索产品 ID / 名称 / 负责人..." style="max-width:260px;margin:0;padding:6px 12px;font-size:13px;border-radius:8px;" oninput="filterProducts()">
+        </div>
         <button class="danger small" onclick="deleteAllProducts()">清空全部产品</button>
       </div>
       <div class="table-wrap">
         <table class="tbl">
-          <thead><tr><th>ID</th><th>名称</th><th>负责人</th><th>负责人邮箱</th><th>关键词</th><th>操作</th></tr></thead>
+          <thead><tr><th>ID</th><th>名称</th><th>内部负责人</th><th>内部邮箱</th><th>关键词</th><th>操作</th></tr></thead>
           <tbody id="product-rows"><tr><td colspan="6" class="empty">加载中...</td></tr></tbody>
         </table>
       </div>
     </div>
   </section>
 
-  <!-- 联系人 -->
-  <section id="tab-contacts" class="panel">
-    <div class="grid">
-      <div class="box">
-        <h3>手工新增联系人</h3>
-        <div class="two-col">
-          <div><label>邮箱 *</label><input id="creator-email" placeholder="user@example.com"></div>
-          <div><label>姓名</label><input id="creator-name" placeholder="客户姓名"></div>
-        </div>
-        <div class="two-col">
-          <div><label>语言</label><input id="creator-language" placeholder="zh-CN / en-US"></div>
-          <div><label>备注</label><input id="creator-notes" placeholder="备注"></div>
-        </div>
-        <button onclick="saveCreator()">保存联系人</button>
+    <!-- 内部客服：可分配负责人名单 + 全局收件人（同一页） -->
+  <section id="tab-internal" class="panel">
+    <div class="box">
+      <h3>可分配负责人名单</h3>
+      <div class="muted" style="margin:0 0 12px">
+        维护团队内<strong>负责处理来信/内部通知</strong>的同事；与产品库「内部负责人」下拉共用这份名单，保存后立即生效。
       </div>
-      <div class="box">
-        <h3>说明</h3>
-        <div class="muted">联系人由系统在处理来信时自动入库，也可在此手动添加。系统不向联系人发送任何主动邀请邮件。</div>
+      <div class="two-col">
+        <div><label>姓名 *</label><input id="staff-new-name" placeholder="如：张三" autocomplete="off"></div>
+        <div><label>内部邮箱 *</label><input id="staff-new-email" type="email" placeholder="zhangsan@company.com" autocomplete="off"></div>
+      </div>
+      <div style="margin-top:10px"><button type="button" onclick="addSupportStaff()">添加到名单</button></div>
+      <div class="table-wrap" style="margin-top:16px">
+        <table class="tbl">
+          <thead><tr><th>姓名</th><th>内部邮箱</th><th>操作</th></tr></thead>
+          <tbody id="staff-rows"><tr><td colspan="3" class="empty">加载中...</td></tr></tbody>
+        </table>
       </div>
     </div>
-    <div class="box" style="margin-top:16px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h3>联系人列表</h3>
-        <button class="danger small" onclick="deleteAllContacts()">全部删除</button>
+    <div class="box esc-settings-card" id="esc-escalation-box" style="margin-top:16px">
+      <div id="esc-minimal-collapsed" class="esc-minimal-collapsed">
+        <span class="esc-minimal-label">全局收件人</span>
+        <button type="button" class="secondary small" onclick="openEscalationEditor()">设置</button>
       </div>
-      <div class="table-wrap">
-        <table class="tbl">
-          <thead><tr><th>ID</th><th>邮箱</th><th>姓名</th><th>语言</th><th>备注</th><th>创建时间</th><th>操作</th></tr></thead>
-          <tbody id="creator-rows"><tr><td colspan="7" class="empty">加载中...</td></tr></tbody>
-        </table>
+      <div id="esc-full-panel" class="esc-full-panel" hidden>
+        <h3>内部通知：全局兜底收件人</h3>
+        <p class="esc-card-sub">无产品负责人时，系统按此邮箱发内部说明邮件</p>
+        <div class="esc-effective-summary" id="esc-effective-summary">
+          <div class="esc-eff-row">
+            <span class="esc-eff-k">全局兜底 · 当前生效</span>
+            <span class="esc-eff-v" id="sum-default-owner">（未配置）</span>
+          </div>
+        </div>
+        <div id="esc-edit-body" class="esc-edit-body">
+          <p class="muted" style="margin:0 0 8px">保存后立即生效；邮箱留空并保存则回退 .env。</p>
+          <div class="esc-form-compact">
+            <div class="two-col">
+              <div>
+                <label>兜底 · 邮箱</label>
+                <input id="esc-default-email" type="email" autocomplete="off" placeholder=".env 或留空">
+              </div>
+              <div>
+                <label>兜底 · 称呼</label>
+                <input id="esc-default-name" autocomplete="off" placeholder="选填">
+              </div>
+            </div>
+          </div>
+          <p class="muted" id="esc-env-hint" style="margin-bottom:0;margin-top:8px"></p>
+          <div class="esc-edit-actions">
+            <button type="button" onclick="saveEscalationSettings()">保存</button>
+            <button type="button" class="secondary" onclick="closeEscalationEditor()">收起</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="box">
+        <h3>说明</h3>
+        <div class="muted">
+          本页集中维护<strong>团队内部</strong>路由：上方为日常可指派同事，下方为无产品/需兜底时的全局兜底收件人；不再在仪表盘维护「来函客户」主档。<br><br>
+          来信匹配到产品时优先通知该产品负责人；未命中、负责人缺省或需公共邮箱时，走全局兜底。<br><br>
+          来函发件人仍会在会话、客诉分析、内部通知中展示，无需在此单独建档。
+        </div>
+      </div>
+      <div class="box">
+        <h3>使用顺序</h3>
+        <div class="muted">
+          先在本页维护<strong>可分配负责人名单</strong>，再到「产品库」绑定各产品负责人。<br><br>
+          需要统一转公共邮箱或全局兜底时，再配置「全局兜底收件人」。
+        </div>
       </div>
     </div>
   </section>
@@ -231,10 +318,12 @@ textarea{min-height:90px;resize:vertical}
       <div id="log-list" class="list"><div class="empty">加载中...</div></div>
     </div>
   </section>
+
 </div>
 
 <script>
 function esc(v){const div=document.createElement('div');div.textContent=v==null?'':String(v);return div.innerHTML;}
+function escAttr(v){if(v==null||v==='')return'';return String(v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
 function showBanner(text,ok=false){const el=document.getElementById('banner');el.textContent=text;el.className='banner show'+(ok?' ok':'');}
 function clearBanner(){const el=document.getElementById('banner');el.className='banner';el.textContent='';}
 async function fetchJson(url,opts={}){
@@ -244,7 +333,13 @@ async function fetchJson(url,opts={}){
   if(!ct.includes('json')) return {};
   return res.json();
 }
-async function api(method,url,body){
+async function api(method,url,body,btn=null){
+  let oldText='';
+  if(btn){
+    oldText=btn.textContent;
+    btn.disabled=true;
+    btn.textContent='处理中...';
+  }
   try{
     const data=await fetchJson(url,{method,body:body?JSON.stringify(body):undefined});
     showBanner('操作成功',true);
@@ -253,8 +348,27 @@ async function api(method,url,body){
   }catch(err){
     showBanner('操作失败: '+err.message,false);
     throw err;
+  }finally{
+    if(btn){
+      btn.disabled=false;
+      btn.textContent=oldText;
+    }
   }
 }
+
+async function handleRefresh(btn){
+  const oldText=btn.textContent;
+  btn.disabled=true;
+  btn.textContent='刷新中...';
+  try{
+    await loadAll();
+    showBanner('数据已刷新',true);
+  }finally{
+    btn.disabled=false;
+    btn.textContent=oldText;
+  }
+}
+
 function switchTab(name,btn){
   document.querySelectorAll('.panel').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(el=>el.classList.remove('active'));
@@ -265,14 +379,21 @@ function splitList(text){
   return String(text||'').split(',').map(v=>v.trim()).filter(Boolean);
 }
 
+function escOwnerDisplay(email){
+  const t=String(email||'').trim();
+  return t||'（未配置）';
+}
 async function loadStatus(){
   const data=await fetchJson('/status');
   document.getElementById('sum-running').textContent=data.auto_polling?'运行中':'已停止';
   const s=data.summary||{};
-  document.getElementById('sum-contacts').textContent=s.contacts??0;
   document.getElementById('sum-products').textContent=s.products??0;
+  const handlerEl=document.getElementById('sum-handlers');
+  if(handlerEl) handlerEl.textContent=s.support_staff??0;
   document.getElementById('sum-intents').textContent=s.intents??0;
   document.getElementById('sum-escalations').textContent=s.escalations??0;
+  const defaultEl=document.getElementById('sum-default-owner');
+  if(defaultEl) defaultEl.textContent=escOwnerDisplay(data.default_support_owner);
 }
 
 async function loadInbox(){
@@ -284,22 +405,23 @@ async function loadInbox(){
   // Thread list
   const threadEl=document.getElementById('thread-list');
   const threads=threadsData.kols||[];
-  if(!threads.length){threadEl.innerHTML='<div class="empty">暂无线程记录</div>';}
+  if(!threads.length){threadEl.innerHTML='<div class="empty">暂无客户会话</div>';}
   else{
     threadEl.innerHTML=threads.slice(0,30).map(row=>`
-      <div class="item">
+      <div class="item thread-item" data-tid-enc="${encodeURIComponent(row.thread_id)}">
         <div class="item-head">
           <div>
             <div><strong>${esc(row.kol_name||row.kol_email)}</strong></div>
             <div class="muted">${esc(row.kol_email||'')} · ${esc(row.intent_label||'未分析')}</div>
           </div>
           <div class="draft-actions" style="margin-top:0">
-            <button class="secondary small" onclick='openThread(${JSON.stringify(row.thread_id)})'>查看线程</button>
-            <button class="danger small" onclick='deleteOneThread(${JSON.stringify(row.thread_id)})'>删除线程</button>
+            <button type="button" class="secondary small thread-toggle-btn" data-tid="${encodeURIComponent(row.thread_id)}" onclick="toggleThread(this)">查看来信</button>
+            <button type="button" class="danger small" onclick="deleteOneThreadFromBtn(this)">删除会话</button>
           </div>
         </div>
         <div class="muted" style="margin-top:4px">${esc(row.notes||'')}</div>
         <div class="muted" style="margin-top:2px">最后更新: ${esc((row.updated_at||'').slice(0,16))}</div>
+        <div class="thread-detail-panel" aria-live="polite"></div>
       </div>
     `).join('');
   }
@@ -319,7 +441,7 @@ async function loadInbox(){
           <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
             <span class="pill ${esc(row.cs_sentiment||'neutral')}">${esc(row.cs_sentiment||'neutral')}</span>
             <span class="pill ${esc(row.cs_tone||'cooperative')}">${esc(row.cs_tone||'cooperative')}</span>
-            ${row.escalated?'<span class="pill escalated">已升级</span>':''}
+            ${row.escalated?'<span class="pill escalated">已转内部</span>':''}
             <button class="danger small" title="删除本条流水" onclick='deleteOneIntent(${row.id})'>删除</button>
           </div>
         </div>
@@ -328,32 +450,83 @@ async function loadInbox(){
   }
 }
 
-async function openThread(threadId){
-  const data=await fetchJson('/thread/'+encodeURIComponent(threadId));
-  const text=(data.messages||[]).map(m=>`${m.role==='our'?'客服':'用户'} | ${(m.subject||'').slice(0,60)}\n${m.body||''}`).join('\n\n----------------\n\n');
-  alert(text||'暂无线程消息');
+function renderThreadMessages(messages){
+  const arr=messages||[];
+  if(!arr.length) return '<div class="empty" style="padding:8px 0">本会话暂无任何往来</div>';
+  return arr.map(m=>{
+    const isOur=m.role==='our';
+    const who=isOur?'客服':'用户';
+    return `<div class="msg-row ${isOur?'msg-our':'msg-them'}">
+      <div class="msg-meta">${esc(who)}${m.subject?` · ${esc(String(m.subject).slice(0,120))}`:''}</div>
+      <div class="msg-body">${esc(m.body||'')}</div>
+    </div>`;
+  }).join('');
+}
+function closeOtherThreadPanels(currentItem){
+  document.querySelectorAll('.thread-item').forEach(el=>{
+    if(el===currentItem) return;
+    const p=el.querySelector('.thread-detail-panel');
+    const b=el.querySelector('.thread-toggle-btn');
+    if(p) p.classList.remove('is-open');
+    if(b) b.textContent='查看来信';
+  });
+}
+async function toggleThread(btn){
+  const enc=btn.getAttribute('data-tid');
+  if(!enc) return;
+  const threadId=decodeURIComponent(enc);
+  const item=btn.closest('.thread-item');
+  const panel=item&&item.querySelector('.thread-detail-panel');
+  if(!panel) return;
+  const isOpen=panel.classList.contains('is-open');
+  if(isOpen){
+    panel.classList.remove('is-open');
+    btn.textContent='查看来信';
+    return;
+  }
+  closeOtherThreadPanels(item);
+  panel.classList.add('is-open');
+  btn.textContent='收起往来';
+  if(panel.dataset.loaded==='1' && panel.innerHTML.trim()!==''){
+    return;
+  }
+  panel.innerHTML='<div class="muted" style="padding:8px 0">加载中…</div>';
+  try{
+    const data=await fetchJson('/thread/'+encodeURIComponent(threadId));
+    panel.innerHTML=renderThreadMessages(data.messages);
+    panel.dataset.loaded='1';
+  }catch(err){
+    panel.innerHTML='<div class="empty" style="padding:8px 0">加载失败: '+esc(err.message)+'</div>';
+    panel.dataset.loaded='';
+  }
+}
+function deleteOneThreadFromBtn(btn){
+  const item=btn.closest('.thread-item');
+  const enc=item&&item.getAttribute('data-tid-enc');
+  if(!enc) return;
+  deleteOneThread(decodeURIComponent(enc));
 }
 
 async function deleteOneThread(threadId){
-  if(!confirm('将删除该线程：对话历史、线程状态、该线程的已处理去重记录，及与该线程关联的情绪流水等。确认？')) return;
+  if(!confirm('将删除本客户会话：对话历史、会话状态、已处理邮件去重记录，及本会话相关客诉分析记录等。确认？')) return;
   const result=await api('DELETE','/thread/'+encodeURIComponent(threadId));
   showBanner(`已删除，影响约 ${result.deleted_rows??0} 行数据`,true);
 }
 
 async function deleteAllThreads(){
-  if(!confirm('将清空线程状态、对话记录、已处理邮件去重（再次拉取同一封邮件将重新处理）。确认？')) return;
+  if(!confirm('将清空所有会话状态、对话记录、已处理邮件去重（再次拉取同一封邮件将重新处理）。确认？')) return;
   const result=await api('DELETE','/threads');
   const tm=result.thread_messages??0;
   const pm=result.processed_messages??0;
   const kt=result.kol_threads??0;
-  showBanner(`线程已清空：对话 ${tm} 条、去重 ${pm} 条、线程 ${kt} 条`,true);
+  showBanner(`会话数据已清空：对话 ${tm} 条、去重 ${pm} 条、会话状态 ${kt} 条`,true);
 }
 
 async function loadEscalations(){
   const data=await fetchJson('/escalations?limit=100');
   const tbody=document.getElementById('escalation-rows');
   const rows=data.escalations||[];
-  if(!rows.length){tbody.innerHTML='<tr><td colspan="7" class="empty">暂无升级记录</td></tr>';return;}
+  if(!rows.length){tbody.innerHTML='<tr><td colspan="7" class="empty">暂无已发内部通知</td></tr>';return;}
   tbody.innerHTML=rows.map(row=>`<tr>
     <td class="muted">${esc((row.sent_at||'').slice(0,16))}</td>
     <td class="muted" style="font-size:11px;word-break:break-all;max-width:180px">${esc((row.thread_id||'').slice(0,60))}</td>
@@ -375,32 +548,106 @@ async function loadIntents(){
     <td>${esc(row.creator_name||'')} <span class="muted">${esc(row.creator_email||'')}</span></td>
     <td><span class="pill ${esc(row.cs_sentiment||'neutral')}">${esc(row.cs_sentiment||'neutral')}</span></td>
     <td><span class="pill ${esc(row.cs_tone||'cooperative')}">${esc(row.cs_tone||'cooperative')}</span></td>
-    <td>${row.escalated?'<span class="pill escalated">已升级</span>':'<span class="pill not-escalated">否</span>'}</td>
+    <td>${row.escalated?'<span class="pill escalated">是</span>':'<span class="pill not-escalated">否</span>'}</td>
     <td class="small muted">${esc(row.summary||'')}</td>
     <td><button class="danger small" onclick="deleteOneIntent(${row.id})">删除</button></td>
   </tr>`).join('');
 }
 
 async function deleteAllIntents(){
-  if(!confirm('确认清空所有情绪识别记录吗？')) return;
+  if(!confirm('确认清空所有客诉分析记录吗？')) return;
   const result=await api('DELETE','/intents');
   showBanner(`已清空 ${result.deleted_count||0} 条记录`,true);
 }
 
 async function deleteOneIntent(id){
-  if(!confirm('确认删除该条情绪流水记录？')) return;
+  if(!confirm('确认删除该条客诉分析记录？')) return;
   await api('DELETE','/intents/'+encodeURIComponent(id));
 }
 
 async function deleteOneEscalation(id){
-  if(!confirm('确认删除该条升级记录？（不影响已发邮件，仅从列表移除）')) return;
+  if(!confirm('确认从列表删除该条内部通知记录？（不影响已发出的负责人邮件，仅本地留痕）')) return;
   await api('DELETE','/escalations/'+encodeURIComponent(id));
 }
 
 async function deleteAllEscalations(){
-  if(!confirm('确认清空所有升级事件记录？')) return;
+  if(!confirm('确认清空全部内部通知留痕？（不影响已发出的邮件，仅本页列表）')) return;
   const result=await api('DELETE','/escalations');
-  showBanner(`已清空 ${result.deleted_count??0} 条升级记录`,true);
+  showBanner(`已清空 ${result.deleted_count??0} 条内部通知留痕`,true);
+}
+
+async function loadSupportStaff(){
+  const data=await fetchJson('/support-staff');
+  const staff=data.staff||[];
+  const tbody=document.getElementById('staff-rows');
+  if(!staff.length){tbody.innerHTML='<tr><td colspan="3" class="empty">暂无内部客服，请先添加</td></tr>';}
+  else{tbody.innerHTML=staff.map(s=>`<tr>
+    <td>${esc(s.display_name)}</td>
+    <td class="muted small">${esc(s.email)}</td>
+    <td><button type="button" class="danger small" onclick="deleteSupportStaff(${s.id})">删除</button></td>
+  </tr>`).join('');}
+  fillProductOwnerSelect(staff);
+}
+function fillProductOwnerSelect(staff){
+  const sel=document.getElementById('product-owner-select');
+  if(!sel) return;
+  const prev=sel.value;
+  let html='<option value="">— 请选择内部负责人 —</option>';
+  staff.forEach(s=>{
+    html+=`<option value="${escAttr(s.email)}" data-display-name="${escAttr(s.display_name)}">${esc(s.display_name)}</option>`;
+  });
+  html+='<option value="__manual__">其他（手动填写内部姓名与邮箱）</option>';
+  sel.innerHTML=html;
+  if(prev==='__manual__'){ sel.value='__manual__'; onProductOwnerSelect(); }
+  else if(prev && [...sel.options].some(o=>o.value===prev)){ sel.value=prev; onProductOwnerSelect(); }
+}
+function onProductOwnerSelect(){
+  const sel=document.getElementById('product-owner-select');
+  const opt=sel&&sel.selectedOptions[0];
+  const manualBox=document.getElementById('product-owner-manual');
+  const emailMain=document.getElementById('product-owner-email');
+  const hidName=document.getElementById('product-owner-name');
+  if(!opt){ return; }
+  const v=opt.value;
+  if(v===''){
+    manualBox.style.display='none';
+    emailMain.value='';
+    hidName.value='';
+    emailMain.readOnly=true;
+    return;
+  }
+  if(v==='__manual__'){
+    manualBox.style.display='grid';
+    emailMain.value='';
+    hidName.value='';
+    emailMain.readOnly=true;
+    return;
+  }
+  manualBox.style.display='none';
+  hidName.value=(opt.textContent||'').trim();
+  emailMain.value=v;
+  emailMain.readOnly=true;
+}
+async function addSupportStaff(){
+  const n=document.getElementById('staff-new-name').value.trim();
+  const e=document.getElementById('staff-new-email').value.trim();
+  if(!n||!e){ showBanner('请填写姓名与内部邮箱',false); return; }
+  await api('POST','/support-staff',{display_name:n,email:e});
+  document.getElementById('staff-new-name').value='';
+  document.getElementById('staff-new-email').value='';
+}
+async function deleteSupportStaff(id){
+  if(!confirm('确认从名单中删除该人员？（已保存的产品负责人不会自动清空）')) return;
+  await api('DELETE','/support-staff/'+encodeURIComponent(id));
+}
+
+function filterProducts(){
+  const q=document.getElementById('product-search').value.toLowerCase();
+  const rows=document.querySelectorAll('#product-rows tr');
+  rows.forEach(tr=>{
+    if(tr.querySelector('.empty')) return;
+    tr.style.display=tr.textContent.toLowerCase().includes(q)?'':'none';
+  });
 }
 
 async function loadProducts(){
@@ -418,25 +665,67 @@ async function loadProducts(){
       <button class="danger small" onclick='deleteProduct(${JSON.stringify(p.id)})'>删除</button>
     </td>
   </tr>`).join('');
+  filterProducts();
 }
 
 function prefillProduct(p){
   document.getElementById('product-id').value=p.id||'';
   document.getElementById('product-name').value=p.name||'';
-  document.getElementById('product-owner-name').value=p.owner_name||'';
-  document.getElementById('product-owner-email').value=p.owner_email||'';
   document.getElementById('product-fallback-email').value=p.fallback_owner_email||'';
   document.getElementById('product-tagline').value=p.tagline||'';
   document.getElementById('product-keywords').value=(p.keywords||[]).join(', ');
   document.getElementById('product-desc').value=p.description||p.intro||'';
+  const em=(p.owner_email||'').trim().toLowerCase();
+  const name=(p.owner_name||'').trim();
+  const sel=document.getElementById('product-owner-select');
+  const manualBox=document.getElementById('product-owner-manual');
+  const emailMain=document.getElementById('product-owner-email');
+  const hidName=document.getElementById('product-owner-name');
+  document.getElementById('product-owner-name-manual').value='';
+  document.getElementById('product-owner-email-manual').value='';
+  let matched=false;
+  for(let i=0;i<sel.options.length;i++){
+    const o=sel.options[i];
+    if(!o.value||o.value==='__manual__') continue;
+    if((o.value||'').toLowerCase()===em){ sel.selectedIndex=i; matched=true; break; }
+  }
+  if(matched){
+    manualBox.style.display='none';
+    onProductOwnerSelect();
+  }else if(em||name){
+    sel.value='__manual__';
+    manualBox.style.display='grid';
+    document.getElementById('product-owner-name-manual').value=name;
+    document.getElementById('product-owner-email-manual').value=p.owner_email||'';
+    hidName.value=name;
+    emailMain.value='';
+    emailMain.readOnly=true;
+  }else{
+    sel.value='';
+    manualBox.style.display='none';
+    emailMain.value='';
+    hidName.value='';
+    emailMain.readOnly=true;
+  }
 }
 
 async function saveProduct(){
+  const selv=document.getElementById('product-owner-select').value;
+  let ownerName='';
+  let ownerEmail='';
+  if(selv==='__manual__'){
+    ownerName=document.getElementById('product-owner-name-manual').value.trim();
+    ownerEmail=document.getElementById('product-owner-email-manual').value.trim();
+  }else if(selv){
+    const opt=document.getElementById('product-owner-select').selectedOptions[0];
+    ownerEmail=(opt&&opt.value)?opt.value.trim():'';
+    ownerName=(opt&&opt.textContent)?opt.textContent.trim():'';
+  }
   await api('POST','/products',{
     id:document.getElementById('product-id').value,
     name:document.getElementById('product-name').value,
-    owner_name:document.getElementById('product-owner-name').value,
-    owner_email:document.getElementById('product-owner-email').value,
+    owner_name:ownerName,
+    owner_email:ownerEmail,
     fallback_owner_email:document.getElementById('product-fallback-email').value,
     tagline:document.getElementById('product-tagline').value,
     keywords:splitList(document.getElementById('product-keywords').value),
@@ -454,45 +743,6 @@ async function deleteAllProducts(){
   if(!confirm('危险：将删除产品库中全部产品，升级路由可能依赖默认负责人。开发环境常用。确定？')) return;
   const result=await api('DELETE','/products');
   showBanner(`已删除 ${result.deleted_count??0} 个产品`,true);
-}
-
-async function loadContacts(){
-  const data=await fetchJson('/creators');
-  const tbody=document.getElementById('creator-rows');
-  const contacts=data.contacts||data.creators||[];
-  if(!contacts.length){tbody.innerHTML='<tr><td colspan="7" class="empty">暂无联系人</td></tr>';return;}
-  tbody.innerHTML=contacts.map(row=>`<tr>
-    <td>${row.id}</td>
-    <td>${esc(row.email)}</td>
-    <td>${esc(row.name||'')}</td>
-    <td>${esc(row.language||row.country||'')}</td>
-    <td>${esc(row.notes||'')}</td>
-    <td class="muted">${esc((row.created_at||'').slice(0,10))}</td>
-    <td>
-      <button class="danger small" onclick='deleteContact(${JSON.stringify(row.id)})'>删除</button>
-    </td>
-  </tr>`).join('');
-}
-
-async function saveCreator(){
-  await api('POST','/creators',{
-    email:document.getElementById('creator-email').value,
-    name:document.getElementById('creator-name').value,
-    language:document.getElementById('creator-language').value,
-    notes:document.getElementById('creator-notes').value,
-  });
-  ['creator-email','creator-name','creator-language','creator-notes'].forEach(id=>document.getElementById(id).value='');
-}
-
-async function deleteContact(id){
-  if(!confirm('确认删除联系人 '+id+' ?')) return;
-  await api('DELETE','/creators/'+encodeURIComponent(id));
-}
-
-async function deleteAllContacts(){
-  if(!confirm('危险操作：确认清空所有联系人数据吗？')) return;
-  const result=await api('DELETE','/creators');
-  showBanner(`已清空 ${result.deleted_count||0} 条联系人数据`,true);
 }
 
 async function loadLogs(){
@@ -513,10 +763,64 @@ async function clearRunLogs(){
   showBanner(`已清空 ${result.cleared_count??0} 条内存日志`,true);
 }
 
+const ESC_EDITOR_COLLAPSED_KEY='escalation_editor_collapsed';
+/** 未设置或为 '1'：仅显示「备用收件人」；'0'：展开完整面板 */
+function isEscEditorCollapsed(){
+  return sessionStorage.getItem(ESC_EDITOR_COLLAPSED_KEY)!=='0';
+}
+
+function applyEscalationEditorVisibility(){
+  const collapsed=isEscEditorCollapsed();
+  const minimal=document.getElementById('esc-minimal-collapsed');
+  const full=document.getElementById('esc-full-panel');
+  if(minimal) minimal.style.display=collapsed?'flex':'none';
+  if(full){
+    full.hidden=collapsed;
+    full.style.display=collapsed?'none':'block';
+  }
+}
+
+function openEscalationEditor(){
+  sessionStorage.setItem(ESC_EDITOR_COLLAPSED_KEY,'0');
+  applyEscalationEditorVisibility();
+}
+
+function closeEscalationEditor(){
+  sessionStorage.setItem(ESC_EDITOR_COLLAPSED_KEY,'1');
+  applyEscalationEditorVisibility();
+}
+
+async function loadEscalationForm(){
+  const d=await fetchJson('/settings/escalation');
+  document.getElementById('esc-default-email').value=d.default_owner_email||'';
+  document.getElementById('esc-default-name').value=d.default_owner_name||'';
+  const ed=esc(d.env_default_email||'（空）');
+  document.getElementById('esc-env-hint').innerHTML=
+    `.env 对照（未在上方填写时使用）：DEFAULT=<code>${ed}</code>`+
+    (d.updated_at?` · 数据库更新时间 ${esc(d.updated_at.slice(0,19))}`:'');
+  applyEscalationEditorVisibility();
+}
+
+async function saveEscalationSettings(){
+  const body={
+    default_owner_email:document.getElementById('esc-default-email').value.trim(),
+    default_owner_name:document.getElementById('esc-default-name').value.trim(),
+  };
+  try{
+    await fetchJson('/settings/escalation',{method:'PUT',body:JSON.stringify(body)});
+    sessionStorage.setItem(ESC_EDITOR_COLLAPSED_KEY,'1');
+    await loadAll();
+    applyEscalationEditorVisibility();
+    showBanner('内部通知收件人（全局兜底）已保存',true);
+  }catch(err){
+    showBanner('保存失败: '+err.message,false);
+  }
+}
+
 async function loadAll(){
   try{
     await loadStatus();
-    await Promise.all([loadInbox(),loadEscalations(),loadIntents(),loadProducts(),loadContacts(),loadLogs()]);
+    await Promise.all([loadEscalationForm(),loadInbox(),loadEscalations(),loadIntents(),loadSupportStaff(),loadProducts(),loadLogs()]);
     clearBanner();
   }catch(err){
     showBanner('加载失败: '+err.message,false);

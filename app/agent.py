@@ -5,18 +5,21 @@ agent.py — 被动入站客服邮件处理器
   1. 拉取未读邮件
   2. 识别所属 thread / 联系人 / 产品
   3. 用 LangGraph 分析情绪；安抚类在发对外回复前先尝试发内部通知，再按「是否已发内部」生成正文（话术与行为一致）
-  4. 自动 send_reply 给用户；安抚类在配置存在负责人时抄送其邮箱
-  5. 升级：写 escalation_events + 发内部通知（含冷却；安抚类可配置忽略冷却）
-  6. 记录 intent_result（含 cs_sentiment / cs_tone / escalated）
+  4. 安抚内部路由：语气 **hostile**（激烈）→ 内部通知**优先**全局备用联系人；其它安抚类（配合/强硬的常见不满）→ **产品 owner 链**（与数据库一致后再备用/默认）
+  5. 自动 send_reply 给用户（不抄送内部）
+  6. 升级：写 escalation_events + 发内部通知（含冷却；安抚类可配置忽略冷却）
+  7. 记录 intent_result（含 cs_sentiment / cs_tone / escalated）
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 
 from app.config import config
 from app.database import (
+    count_escalation_events_for_thread,
     create_escalation_event,
     create_intent_result,
     get_creator,
@@ -32,6 +35,7 @@ from app.database import (
     upsert_creator,
     upsert_thread_state,
 )
+from app.escalation_settings import effective_default_owner
 from app.graphs import run_inbound_graph
 from app.llm_service import (
     generate_calm_reply,
@@ -41,6 +45,90 @@ from app.llm_service import (
 from app.mail_service import fetch_unread_emails, send_internal_escalation, send_reply
 
 logger = logging.getLogger(__name__)
+
+
+def _thread_has_prior_our_message(thread_history: list[dict]) -> bool:
+    """本线程中是否已有我方（客服）发出过的历史。"""
+    return any(m.get("is_mine") for m in (thread_history or []))
+
+
+def _has_order_reference(text: str) -> bool:
+    if not (text and text.strip()):
+        return False
+    t = text.strip()
+    if re.search(
+        r"(?:订单|单号|order\s*#?|order\s*no\.?|purchase)[\s:：#]*[A-Za-z0-9#\-]{4,64}",
+        t,
+        re.I,
+    ):
+        return True
+    if re.search(
+        r"(?:[A-Z]{2,}\d[\dA-Z\-/]*|\d{8,16}(?![.\d/])|#[A-Za-z0-9#\-/]{3,}|[#＃(（]\s*[\dA-Z\-#]{4,}|[#＃]?\d{4,}[-/]\d+)",
+        t,
+    ):
+        return True
+    if re.search(r"(?<![.\d])\d{8,16}(?![.\d])", t):
+        return True
+    return False
+
+
+def _has_product_mention_in_text(text: str, product: dict | None) -> bool:
+    if not (text and text.strip()):
+        return False
+    t = text.strip()
+    if product:
+        name = (product.get("name") or "").strip()
+        if name and name in t:
+            return True
+        for kw in (product.get("keywords") or [])[:12]:
+            ks = str(kw).strip()
+            if len(ks) >= 2 and ks in t:
+                return True
+    if re.search(
+        r"(产品|品名|型号|款|item|product|sku|套装|系列)"
+        r"|(筋膜枪|瑜伽垫|跳绳|哑铃|弹力|阻力|按摩|器材)",
+        t,
+        re.I,
+    ):
+        return True
+    return bool(re.search(r"[\u4e00-\u9fff]{2,}", t) and len(t) >= 6)
+
+
+def _looks_order_and_product_only_followup(
+    thread_history: list[dict],
+    latest: str,
+    product: dict | None,
+) -> bool:
+    """
+    我方已回过信后：若本封能识别出订单/单号类信息，且能对应到品名/产品指称，篇幅不长，
+    则视为客户已按上封要求补全「单号+品名」、**不再追问题描述**，进入收尾感谢+致歉+已转售后。
+    """
+    if not _thread_has_prior_our_message(thread_history):
+        return False
+    if not _has_order_reference(latest):
+        return False
+    if not _has_product_mention_in_text(latest, product):
+        return False
+    if len((latest or "").strip()) > 800:
+        return False
+    return True
+
+
+def _calm_reply_mode(
+    thread_history: list[dict],
+    latest_message: str,
+    product: dict | None,
+) -> str:
+    """
+    initial_three: 本线程中我方将发出**第一封**正式客服回复
+    close_ack: 客户已补订单+品名、收尾致谢与致歉
+    default: 其它多轮安抚
+    """
+    if not _thread_has_prior_our_message(thread_history):
+        return "initial_three"
+    if _looks_order_and_product_only_followup(thread_history, latest_message, product):
+        return "close_ack"
+    return "default"
 
 
 def _thread_key(msg: dict) -> str:
@@ -101,10 +189,10 @@ def _resolve_product(thread_id: str) -> dict | None:
 
 def _get_owner_email_and_name(product: dict | None) -> tuple[str, str]:
     """
-    按 1A 规则确定内部升级收件人：
+    确定内部升级收件人：
       1. 产品的 owner_email
       2. 产品的 fallback_owner_email
-      3. 全局 DEFAULT_SUPPORT_OWNER_EMAIL
+      3. 全局兜底（仪表盘或 .env 的 DEFAULT）
     """
     if product:
         email = (product.get("owner_email") or "").strip()
@@ -113,8 +201,26 @@ def _get_owner_email_and_name(product: dict | None) -> tuple[str, str]:
             return email, name
         fallback = (product.get("fallback_owner_email") or "").strip()
         if fallback:
-            return fallback, name
-    return config.DEFAULT_SUPPORT_OWNER_EMAIL, config.DEFAULT_SUPPORT_OWNER_NAME
+            return fallback, name or (product.get("owner_name") or "").strip()
+    default_email, default_name = effective_default_owner()
+    return default_email, default_name
+
+
+def _get_calm_internal_recipient(
+    product: dict | None, *, intense: bool
+) -> tuple[str, str]:
+    """
+    安抚类内部通知收件人。
+    
+    - intense（语气 hostile / 情绪激烈）或非激烈：均沿用 _get_owner_email_and_name，
+      即优先产品负责人链，无则走全局兜底。
+    """
+    if not intense:
+        return _get_owner_email_and_name(product)
+    default_email, default_name = effective_default_owner()
+    if default_email:
+        return default_email, default_name
+    return _get_owner_email_and_name(product)
 
 
 def _cooldown_ok(thread_id: str) -> bool:
@@ -177,10 +283,16 @@ def _handle_one_email(msg: dict) -> dict:
     escalation_summary = (graph_result.get("escalation_summary") or "").strip()
 
     needs_calm = sentiment == "dissatisfied" or tone in ("firm", "hostile")
+    # 语气 hostile 视为需要「跪舔级」安抚 + 内部通知**优先**备用联系人；其余安抚类走产品/默认链
+    calm_intense = needs_calm and tone == "hostile"
 
-    logger.info(f"🧠 情绪: {sentiment} | 语气: {tone} | 升级: {should_escalate} | 安抚类: {needs_calm}")
+    logger.info(
+        f"🧠 情绪: {sentiment} | 语气: {tone} | 升级: {should_escalate} | 安抚类: {needs_calm} | 激烈(备用): {calm_intense}"
+    )
 
-    owner_email, owner_name = _get_owner_email_and_name(resolved_product)
+    owner_email, owner_name = _get_calm_internal_recipient(
+        resolved_product, intense=calm_intense
+    )
     escalated_flag = False
     after_sales_notified = False
 
@@ -188,14 +300,33 @@ def _handle_one_email(msg: dict) -> dict:
         if not owner_email:
             logger.warning("⚠️ 升级无收件人：产品未绑定 owner，DEFAULT_SUPPORT_OWNER_EMAIL 亦为空")
             return False
+        # 避免将「客服工单」误发到客户邮箱（产品负责人 / 默认邮箱若误填为 KOL 邮箱）
+        _owner_l = owner_email.strip().lower()
+        _from_l = (msg.get("from_email") or "").strip().lower()
+        _contact_l = (contact.get("email") or "").strip().lower()
+        if _owner_l and (_owner_l == _from_l or (_contact_l and _owner_l == _contact_l)):
+            logger.error(
+                "⚠️ 内部升级收件人与客户邮箱相同，已跳过发送工单，请检查产品 owner / DEFAULT_SUPPORT_OWNER_EMAIL 配置"
+            )
+            return False
         if not _can_send_escalation_now(thread_id, for_calm_path=for_calm):
             logger.info(f"⏳ 升级冷却中，跳过内部通知（cooldown={config.ESCALATION_EMAIL_COOLDOWN_MINUTES}min）")
             return False
+        # 同线程已成功写入的升级条数；本封即将发送的为第 (prior+1) 次推送
+        prior_count = count_escalation_events_for_thread(thread_id)
+        push_sequence = prior_count + 1
         contact_name = contact.get("name") or contact.get("email") or "未知联系人"
         contact_email = contact.get("email") or ""
         product_name = (resolved_product or {}).get("name") or "未绑定产品"
         priority = "high" if tone == "hostile" else "medium"
-        orig_for_escalation = (msg.get("body") or "")[:2000]
+        # 为了让产品负责人看到完整的上下文（尤其是第二封信补齐信息的场景），将历史拼接
+        history_lines = []
+        for item in thread_history[-3:]:
+            role = "客服" if item.get("is_mine") else (contact.get("name") or "客户")
+            history_lines.append(f"[{role}] {item.get('body', '')[:300]}")
+        history_lines.append(f"[{contact.get('name') or '客户'}] {msg.get('body', '')[:1000]}")
+        orig_for_escalation = "\n\n".join(history_lines)[:2000]
+        
         original_message_zh = translate_to_chinese_for_support(orig_for_escalation)
 
         summary = escalation_summary
@@ -204,7 +335,7 @@ def _handle_one_email(msg: dict) -> dict:
                 thread_id=thread_id,
                 contact=contact,
                 product=resolved_product,
-                latest_message=msg["body"],
+                latest_message=orig_for_escalation,
                 sentiment=sentiment,
                 tone=tone,
                 reason=reason,
@@ -222,6 +353,7 @@ def _handle_one_email(msg: dict) -> dict:
             escalation_summary=summary,
             original_message=orig_for_escalation,
             original_message_zh=original_message_zh,
+            push_sequence=push_sequence,
         )
         if success:
             create_escalation_event(
@@ -237,15 +369,45 @@ def _handle_one_email(msg: dict) -> dict:
             logger.info(f"🚨 已发送升级通知 → {owner_email}")
         return success
 
-    # ── 安抚类：先发内部通知（成功后才在对外回复中写「已联系售后」），再生成正文并抄送负责人 ──
-    if needs_calm:
-        if owner_email:
-            if _do_send_internal(escalation_reason or "客户表达不满，需售后同步", for_calm=True):
-                escalated_flag = True
-                after_sales_notified = True
-        else:
-            logger.warning("⚠️ 安抚类来信但无负责人邮箱：对外不声称已联系售后，亦不抄送")
+    # ── 决定是否立即发内部通知（基于严重度与状态机） ──
+    is_red_alert = calm_intense or should_escalate
+    thread_text_for_order = msg["body"] + " " + " ".join(m.get("body", "") for m in thread_history)
+    has_order = _has_order_reference(thread_text_for_order)
+    info_complete = (resolved_product is not None) and has_order
 
+    should_send_internal_now = False
+    reason_internal = escalation_reason or "客户表达不满，需售后同步"
+
+    if is_red_alert:
+        should_send_internal_now = True
+        de, _ = effective_default_owner()
+        if calm_intense and de and owner_email and owner_email.strip().lower() == de.strip().lower():
+            reason_internal = f"{reason_internal} [路由:情绪激烈→全局收件人]"
+        elif calm_intense and not de:
+            reason_internal = f"{reason_internal} [路由:情绪激烈但无全局邮箱→产品负责人链]"
+        else:
+            reason_internal = f"{reason_internal} [路由:触发强制升级/警报→强推内部]"
+    elif needs_calm:
+        if info_complete:
+            should_send_internal_now = True
+            reason_internal = f"{reason_internal} [路由:一般反馈且信息齐备→推送产品负责人]"
+        else:
+            should_send_internal_now = False
+            logger.info("⏳ 一般不满但信息未齐（缺订单号或产品名），暂挂起不发内部通知，等待客户补齐。")
+
+    if needs_calm:
+        if should_send_internal_now:
+            if owner_email:
+                if _do_send_internal(reason_internal, for_calm=True):
+                    escalated_flag = True
+                    after_sales_notified = True
+            else:
+                logger.warning("⚠️ 需要通知内部但无负责人邮箱：对外不声称已联系售后")
+        
+        calm_mode = _calm_reply_mode(thread_history, msg["body"], resolved_product)
+        logger.info(
+            f"   安抚回复模式: {calm_mode} (首封索三项=initial_three / 单号+品名收尾=close_ack / 其他=default)"
+        )
         suggested_reply = generate_calm_reply(
             contact=contact,
             product=resolved_product,
@@ -254,16 +416,19 @@ def _handle_one_email(msg: dict) -> dict:
             latest_message=msg["body"],
             thread_history=thread_history,
             after_sales_notified=after_sales_notified,
+            product_resolved=resolved_product is not None,
+            intense_appeasement=calm_intense,
+            calm_mode=calm_mode,
         )
     elif should_escalate:
-        # 非安抚但需升级（罕见，如关键词命中而情绪识别未标为不满）
-        if _do_send_internal(escalation_reason, for_calm=False):
-            escalated_flag = True
+        # 非安抚但需升级（如仅关键词命中）
+        if should_send_internal_now and owner_email:
+            if _do_send_internal(reason_internal, for_calm=False):
+                escalated_flag = True
 
     # ── 发送用户回复 ────────────────────────────────────────────────────────────
     if suggested_reply:
-        cc_list = [owner_email] if (needs_calm and owner_email) else None
-        sent_ok = send_reply(original=msg, reply_body=suggested_reply, cc_emails=cc_list)
+        sent_ok = send_reply(original=msg, reply_body=suggested_reply)
         if sent_ok:
             save_thread_message(
                 thread_id=thread_id,

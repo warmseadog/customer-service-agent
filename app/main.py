@@ -17,27 +17,24 @@ from fastapi.responses import HTMLResponse
 
 from app.agent import run_check_cycle
 from app.config import config
+from app.escalation_settings import save_settings_from_api, settings_api_dict
 from app.database import (
     clear_all_thread_data,
     count_escalation_events,
     delete_all_data,
     delete_all_escalation_events,
     delete_escalation_event,
+    delete_support_staff,
     delete_thread,
     get_thread_messages,
     init_db,
+    insert_support_staff,
     list_all_threads,
     list_escalation_events,
     list_processed_messages,
+    list_support_staff,
 )
 from app.mail_service import fetch_unread_emails
-from app.services.creator_service import (
-    list_creator_rows,
-    patch_creator,
-    remove_all_creators,
-    remove_creator,
-    save_creator,
-)
 from app.services.lead_service import (
     list_intent_rows,
     remove_all_intents,
@@ -62,6 +59,7 @@ _log_buffer: deque = deque(maxlen=500)
 _dashboard_path = Path(__file__).parent / "web" / "dashboard.html"
 _bg_task = None
 _is_running = False
+_check_lock = asyncio.Lock()
 
 
 class _MemLogHandler(logging.Handler):
@@ -79,6 +77,19 @@ _mem_handler = _MemLogHandler()
 _mem_handler.setFormatter(logging.Formatter("%(message)s"))
 logging.getLogger().addHandler(_mem_handler)
 
+_MSG_400 = "请求无效或参数错误，请查看服务日志。"
+_MSG_500 = "服务暂时不可用，请稍后再试或查看服务日志。"
+
+
+def _raise_bad_request(exc: BaseException) -> None:
+    logger.warning("HTTP 400: %s", exc, exc_info=True)
+    raise HTTPException(status_code=400, detail=_MSG_400) from exc
+
+
+def _raise_server_error(exc: BaseException) -> None:
+    logger.error("HTTP 500: %s", exc, exc_info=True)
+    raise HTTPException(status_code=500, detail=_MSG_500) from exc
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -87,7 +98,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"   品牌: {config.BRAND_NAME}")
     logger.info(f"   邮箱: {config.EMAIL_ADDRESS}")
     logger.info(f"   LLM:  {config.LLM_MODEL} @ {config.LLM_BASE_URL}")
-    logger.info(f"   默认升级负责人: {config.DEFAULT_SUPPORT_OWNER_EMAIL or '（未配置）'}")
+    _esc = settings_api_dict()
+    logger.info(
+        f"   全局兜底收件人(生效): {_esc['effective_default_email'] or '（未配置）'}"
+    )
     logger.info("   Dashboard: http://localhost:8000/dashboard")
     yield
     logger.info("👋 服务已关闭")
@@ -105,24 +119,25 @@ async def _polling_loop():
     global _is_running
     while _is_running:
         try:
-            run_check_cycle()
+            async with _check_lock:
+                await asyncio.to_thread(run_check_cycle)
         except Exception as exc:
             logger.error(f"❌ 轮询异常: {exc}", exc_info=True)
         await asyncio.sleep(config.POLL_INTERVAL)
 
 
 def _summary() -> dict:
-    contacts = list_creator_rows()
     products = list_product_rows()
     intents = list_intent_rows(limit=200)
     escalations = count_escalation_events()
     processed = list_processed_messages(limit=200)
+    staff = list_support_staff()
     return {
-        "contacts": len(contacts),
         "products": len(products),
         "intents": len(intents),
         "escalations": escalations,
         "processed": len(processed),
+        "support_staff": len(staff),
     }
 
 
@@ -138,15 +153,35 @@ async def root():
 
 @app.get("/status")
 async def get_status():
+    esc = settings_api_dict()
     return {
         "auto_polling": _is_running,
         "poll_interval_seconds": config.POLL_INTERVAL,
         "email_account": config.EMAIL_ADDRESS,
         "brand": config.BRAND_NAME,
         "llm_model": config.LLM_MODEL,
-        "default_support_owner": config.DEFAULT_SUPPORT_OWNER_EMAIL,
+        "default_support_owner": esc["effective_default_email"],
         "summary": _summary(),
     }
+
+
+@app.get("/settings/escalation")
+async def get_escalation_settings_api():
+    """全局升级收件：数据库覆盖项 + 生效值 + .env 原始值（只读对照）。"""
+    return settings_api_dict()
+
+
+@app.put("/settings/escalation")
+async def put_escalation_settings_api(payload: dict):
+    """保存到数据库；某字段传空字符串则清除覆盖，该字段回退 .env。"""
+    try:
+        saved = save_settings_from_api(
+            default_owner_email=payload.get("default_owner_email"),
+            default_owner_name=payload.get("default_owner_name"),
+        )
+    except Exception as exc:
+        _raise_bad_request(exc)
+    return {"status": "ok", **saved}
 
 
 @app.post("/start-auto")
@@ -175,11 +210,14 @@ async def stop_auto():
 
 @app.post("/check")
 async def check_now():
+    if _check_lock.locked():
+        raise HTTPException(status_code=409, detail="已有检查任务正在后台运行，请勿重复点击。")
     try:
-        result = run_check_cycle()
+        async with _check_lock:
+            result = await asyncio.to_thread(run_check_cycle)
         return {"status": "success", **result}
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        _raise_server_error(exc)
 
 
 @app.get("/emails")
@@ -187,7 +225,7 @@ async def list_emails(limit: int = 10):
     try:
         emails = fetch_unread_emails(limit=limit)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        _raise_server_error(exc)
     return {
         "count": len(emails),
         "emails": [
@@ -203,45 +241,6 @@ async def list_emails(limit: int = 10):
     }
 
 
-# ─── 联系人（creators 表，客服语义） ────────────────────────────────────────────
-
-@app.get("/creators")
-async def list_creators_api():
-    rows = list_creator_rows()
-    return {"count": len(rows), "contacts": rows}
-
-
-@app.post("/creators")
-async def save_creator_api(payload: dict):
-    try:
-        contact = save_creator(payload)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    return {"status": "ok", "contact": contact}
-
-
-@app.put("/creators/{creator_id}")
-async def update_creator_api(creator_id: int, payload: dict):
-    contact = patch_creator(creator_id, payload)
-    if not contact:
-        raise HTTPException(status_code=404, detail="联系人不存在")
-    return {"status": "ok", "contact": contact}
-
-
-@app.delete("/creators/{creator_id}")
-async def delete_creator_api(creator_id: int):
-    ok = remove_creator(creator_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="联系人不存在或删除失败")
-    return {"status": "ok"}
-
-
-@app.delete("/creators")
-async def delete_all_creators_api():
-    count = remove_all_creators()
-    return {"status": "ok", "deleted_count": count}
-
-
 # ─── 产品库（含 owner 字段，1A 唯一维护入口） ───────────────────────────────────
 
 @app.get("/products")
@@ -255,7 +254,7 @@ async def save_product_api(payload: dict):
     try:
         product = save_product(payload)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        _raise_bad_request(exc)
     return {"status": "ok", "product": product}
 
 
@@ -273,7 +272,34 @@ async def delete_all_products_api():
     return {"status": "ok", "deleted_count": count}
 
 
-# ─── 意图/情绪流水 ──────────────────────────────────────────────────────────────
+# ─── 内部客服处理人员（产品负责人下拉数据源）──────────────────────────────────
+
+@app.get("/support-staff")
+async def list_support_staff_api():
+    rows = list_support_staff()
+    return {"count": len(rows), "staff": rows}
+
+
+@app.post("/support-staff")
+async def add_support_staff_api(payload: dict):
+    try:
+        row = insert_support_staff(
+            display_name=str(payload.get("display_name") or ""),
+            email=str(payload.get("email") or ""),
+        )
+    except ValueError as exc:
+        _raise_bad_request(exc)
+    return {"status": "ok", "staff": row}
+
+
+@app.delete("/support-staff/{staff_id}")
+async def delete_support_staff_api(staff_id: int):
+    if not delete_support_staff(staff_id):
+        raise HTTPException(status_code=404, detail="记录不存在")
+    return {"status": "deleted", "id": staff_id}
+
+
+# ─── 意图/客诉分析 ──────────────────────────────────────────────────────────────
 
 @app.get("/intents")
 async def list_intents_api(limit: int = 100):
@@ -295,7 +321,7 @@ async def delete_all_intents_api():
     return {"status": "ok", "deleted_count": count}
 
 
-# ─── 升级记录 ───────────────────────────────────────────────────────────────────
+# ─── 内部通知（escalation）留痕 ─────────────────────────────────────────────────
 
 @app.get("/escalations")
 async def list_escalations_api(limit: int = 100):
@@ -314,11 +340,11 @@ async def delete_escalation_api(escalation_id: int):
 @app.delete("/escalations")
 async def delete_all_escalations_api():
     count = delete_all_escalation_events()
-    logger.info(f"🗑️ 已清空升级记录 {count} 条")
+    logger.info(f"🗑️ 已清空内部通知留痕 {count} 条")
     return {"status": "ok", "deleted_count": count}
 
 
-# ─── 会话/线程 ──────────────────────────────────────────────────────────────────
+# ─── 客户会话（技术字段 thread_id）────────────────────────────────────────────
 
 @app.get("/kols")
 async def list_kols():
@@ -383,7 +409,8 @@ async def delete_all_api():
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     if not _dashboard_path.exists():
-        raise HTTPException(status_code=500, detail="dashboard 文件不存在")
+        logger.error("dashboard 文件不存在: %s", _dashboard_path)
+        raise HTTPException(status_code=500, detail=_MSG_500)
     return HTMLResponse(_dashboard_path.read_text(encoding="utf-8"))
 
 

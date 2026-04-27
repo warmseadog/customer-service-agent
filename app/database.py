@@ -8,7 +8,9 @@ database.py — SQLite 持久化层
   4. 消息历史（thread_messages）
   5. 意图/情绪识别结果（intent_results）含 cs_sentiment/cs_tone/escalated
   6. 升级事件（escalation_events）
-  7. 外呼历史（campaigns/outreach_messages）— 保留表结构供数据兼容，不再写入新数据
+  7. 全局升级收件覆盖（support_escalation_settings，单行）
+  8. 内部客服名单（support_staff）：产品负责人下拉选用
+  9. 外呼历史（campaigns/outreach_messages）— 保留表结构供数据兼容，不再写入新数据
 """
 
 from __future__ import annotations
@@ -78,6 +80,40 @@ def _row_to_creator(row: sqlite3.Row | None) -> dict | None:
     data = dict(row)
     data["tags"] = _json_loads(data.get("tags"))
     return data
+
+
+def _seed_support_staff_if_needed(conn: sqlite3.Connection) -> None:
+    existing = conn.execute("SELECT COUNT(1) AS cnt FROM support_staff").fetchone()
+    if existing and existing["cnt"]:
+        return
+    seed_path = Path(config.SUPPORT_STAFF_PATH)
+    if not seed_path.exists():
+        return
+    try:
+        items = json.loads(seed_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning(f"⚠️ 内部客服名单种子导入失败: {exc}")
+        return
+    if not isinstance(items, list) or not items:
+        return
+    now = _now_iso()
+    for idx, item in enumerate(items):
+        if not isinstance(item, dict):
+            continue
+        name = (item.get("display_name") or item.get("name") or "").strip()
+        em = (item.get("email") or "").strip().lower()
+        if not name or not em:
+            continue
+        try:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO support_staff (display_name, email, sort_order, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (name, em, idx, now),
+            )
+        except Exception:
+            pass
 
 
 def _seed_products_if_needed(conn: sqlite3.Connection) -> None:
@@ -323,6 +359,39 @@ def init_db() -> None:
         )
         """
     )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS support_escalation_settings (
+            id                   INTEGER PRIMARY KEY CHECK (id = 1),
+            backup_owner_email   TEXT,
+            backup_owner_name    TEXT,
+            default_owner_email  TEXT,
+            default_owner_name   TEXT,
+            updated_at           TEXT NOT NULL
+        )
+        """
+    )
+
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS support_staff (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            display_name  TEXT NOT NULL,
+            email         TEXT NOT NULL UNIQUE,
+            sort_order    INTEGER NOT NULL DEFAULT 0,
+            created_at    TEXT NOT NULL
+        )
+        """
+    )
+    if not conn.execute(
+        "SELECT 1 FROM support_escalation_settings WHERE id = 1"
+    ).fetchone():
+        conn.execute(
+            "INSERT INTO support_escalation_settings (id, updated_at) VALUES (1, ?)",
+            (_now_iso(),),
+        )
+
     # migrate old table name if it still exists
     old_tables = {
         row[0]
@@ -347,6 +416,7 @@ def init_db() -> None:
     _ensure_column(conn, "intent_results", "cs_tone", "TEXT")
     _ensure_column(conn, "intent_results", "escalated", "INTEGER NOT NULL DEFAULT 0")
 
+    _seed_support_staff_if_needed(conn)
     _seed_products_if_needed(conn)
     conn.commit()
     conn.close()
@@ -643,6 +713,70 @@ def delete_all_products() -> int:
     conn.commit()
     conn.close()
     return deleted
+
+
+# ─── support_staff（内部客服，产品负责人下拉）──────────────────────────────────
+
+def list_support_staff() -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT id, display_name, email, sort_order, created_at FROM support_staff ORDER BY sort_order ASC, id ASC"
+    ).fetchall()
+    conn.close()
+    return [
+        {
+            "id": row["id"],
+            "display_name": row["display_name"] or "",
+            "email": (row["email"] or "").strip(),
+            "sort_order": int(row["sort_order"] or 0),
+        }
+        for row in rows
+    ]
+
+
+def insert_support_staff(*, display_name: str, email: str) -> dict:
+    name = (display_name or "").strip()
+    em = (email or "").strip().lower()
+    if not name:
+        raise ValueError("姓名为空")
+    if not em or "@" not in em:
+        raise ValueError("邮箱无效")
+    now = _now_iso()
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO support_staff (display_name, email, sort_order, created_at)
+            VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM support_staff), ?)
+            """,
+            (name, em, now),
+        )
+        sid = cur.lastrowid
+        conn.commit()
+    except sqlite3.IntegrityError as e:
+        conn.close()
+        raise ValueError("该邮箱已存在") from e
+    except Exception:
+        conn.close()
+        raise
+    row = conn.execute("SELECT * FROM support_staff WHERE id = ?", (sid,)).fetchone()
+    conn.close()
+    if not row:
+        raise RuntimeError("插入失败")
+    return {
+        "id": row["id"],
+        "display_name": row["display_name"],
+        "email": row["email"],
+        "sort_order": row["sort_order"],
+    }
+
+
+def delete_support_staff(staff_id: int) -> bool:
+    conn = _get_conn()
+    deleted = conn.execute("DELETE FROM support_staff WHERE id = ?", (staff_id,)).rowcount
+    conn.commit()
+    conn.close()
+    return bool(deleted)
 
 
 # ─── campaigns / outreach ─────────────────────────────────────────────────────
@@ -960,6 +1094,17 @@ def get_last_escalation_time(thread_id: str) -> str | None:
     return row["sent_at"] if row else None
 
 
+def count_escalation_events_for_thread(thread_id: str) -> int:
+    """该线程已成功记录的升级事件条数（发内部邮件前统计，用于标注第几次推送）。"""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT COUNT(1) AS cnt FROM escalation_events WHERE thread_id = ?",
+        (thread_id,),
+    ).fetchone()
+    conn.close()
+    return int(row["cnt"]) if row and row["cnt"] is not None else 0
+
+
 def count_escalation_events() -> int:
     conn = _get_conn()
     row = conn.execute("SELECT COUNT(1) AS cnt FROM escalation_events").fetchone()
@@ -1242,3 +1387,56 @@ def delete_all_data() -> dict:
     conn.commit()
     conn.close()
     return result
+
+
+# ─── support_escalation_settings（全局升级收件，仪表盘可覆盖 .env）────────────────
+
+def get_support_escalation_settings() -> dict:
+    """单行配置；字段可为 None 表示未在数据库中覆盖，将回退 .env。"""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM support_escalation_settings WHERE id = 1"
+    ).fetchone()
+    conn.close()
+    if not row:
+        return {
+            "default_owner_email": None,
+            "default_owner_name": None,
+            "updated_at": None,
+        }
+    return dict(row)
+
+
+def upsert_support_escalation_settings(
+    *,
+    default_owner_email: str | None,
+    default_owner_name: str | None,
+) -> dict:
+    def _norm(s: str | None) -> str | None:
+        if s is None:
+            return None
+        t = str(s).strip()
+        return t if t else None
+
+    payload = {
+        "default_owner_email": _norm(default_owner_email),
+        "default_owner_name": _norm(default_owner_name),
+        "updated_at": _now_iso(),
+    }
+    conn = _get_conn()
+    conn.execute(
+        """
+        INSERT INTO support_escalation_settings (
+            id, default_owner_email, default_owner_name, updated_at
+        )
+        VALUES (1, :default_owner_email, :default_owner_name, :updated_at)
+        ON CONFLICT(id) DO UPDATE SET
+            default_owner_email = excluded.default_owner_email,
+            default_owner_name = excluded.default_owner_name,
+            updated_at = excluded.updated_at
+        """,
+        payload,
+    )
+    conn.commit()
+    conn.close()
+    return get_support_escalation_settings()

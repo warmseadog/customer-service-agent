@@ -149,20 +149,27 @@ def _generate_reply(state: InboundState) -> InboundState:
         product=state.get("product"),
         latest_message=state.get("latest_message", ""),
         thread_history=state.get("thread_history", []),
+        sentiment=state.get("sentiment", "neutral"),
     )
     return {"suggested_reply": reply}
 
 
 def _generate_escalation_summary(state: InboundState) -> InboundState:
-    """在 should_escalate 或安抚类（需对外承诺售后）时生成内部升级摘要。"""
+    """在应该升级或安抚类时生成内部升级摘要。结合上下文避免客户单回订单号时摘要信息缺失。"""
     if not state.get("should_escalate") and not _needs_calm(state):
         return {"escalation_summary": ""}
+
+    hist = state.get("thread_history", [])
+    latest = state.get("latest_message", "")
+    context_msgs = [m.get("body", "") for m in hist[-2:] if not m.get("is_mine")]
+    context_msgs.append(latest)
+    combined_latest = "\n\n".join(context_msgs)
 
     summary = generate_escalation_summary(
         thread_id=state.get("thread_id", ""),
         contact=state.get("contact", {}),
         product=state.get("product"),
-        latest_message=state.get("latest_message", ""),
+        latest_message=combined_latest,
         sentiment=state.get("sentiment", ""),
         tone=state.get("tone", ""),
         reason=state.get("escalation_reason", ""),

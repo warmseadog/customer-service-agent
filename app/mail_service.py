@@ -4,7 +4,7 @@ mail_service.py — 阿里企业邮箱 IMAP 收件 + SMTP 发件（客服场景�
 功能：
   1. fetch_unread_emails()        IMAP 拉取未读来信
   2. send_reply()                 回复用户邮件（可 Cc 负责人；Thread 串联，防 Spam 头部）
-  3. send_internal_escalation()   向产品负责人发送内部升级通知邮件（含用户原文 + 中译）
+  3. send_internal_escalation()   内部升级邮件（含原文+中译；按同线程推送次序标注「初次推送 / 第二次推送 / …」）
 
 防 Spam 设计：
   - In-Reply-To + References 串联 Thread
@@ -227,6 +227,16 @@ def send_reply(
         return False
 
 
+def _escalation_push_label(push_sequence: int) -> str:
+    """同线程内部升级邮件的主题/正文标签：1=初次推送，2=第二次推送，其余=第N次推送。"""
+    n = max(1, int(push_sequence))
+    if n == 1:
+        return "初次推送"
+    if n == 2:
+        return "第二次推送"
+    return f"第{n}次推送"
+
+
 def send_internal_escalation(
     *,
     to_email: str,
@@ -239,6 +249,7 @@ def send_internal_escalation(
     escalation_summary: str,
     original_message: str = "",
     original_message_zh: str = "",
+    push_sequence: int = 1,
 ) -> bool:
     """
     向产品负责人发送内部客服升级通知邮件。
@@ -246,7 +257,7 @@ def send_internal_escalation(
     Args:
         to_email:              收件人邮箱（产品 owner_email 或 DEFAULT_SUPPORT_OWNER_EMAIL）
         to_name:               收件人姓名
-        thread_id:             线程 ID
+        thread_id:             会话 ID（邮件线程 key，排障用）
         contact_name:          触发升级的联系人姓名
         contact_email:         触发升级的联系人邮箱
         product_name:          绑定产品名称
@@ -254,12 +265,15 @@ def send_internal_escalation(
         escalation_summary:    由 LLM 生成的 ≤5 行摘要
         original_message:      用户来信原文（任意语种，节选）
         original_message_zh:   原文的简体中文完整译文，供内部客服阅读
+        push_sequence:         本会话内向客服的第几次推送（1=初次，2=第二次，依此类推）
 
     Returns:
         bool: 发送成功返回 True
     """
     try:
-        subject = f"[客服升级] {contact_name} — {product_name}"
+        seq = max(1, int(push_sequence))
+        phase_label = _escalation_push_label(seq)
+        subject = f"[客服升级·{phase_label}] {contact_name} — {product_name}"
         orig = (original_message or "").strip()
         orig_zh = (original_message_zh or "").strip()
         if orig and orig_zh:
@@ -276,19 +290,43 @@ def send_internal_escalation(
         else:
             original_block = ""
 
+        if seq == 1:
+            phase_intro = (
+                f"【推送次序】{phase_label}（本会话第 1 封内部同步）\n"
+                "说明：本会话首次因客诉/不满等向客服推送，便于尽早知晓并建档；"
+                "若客户尚未提供订单号等，后续来信可能还会收到「第二次推送」及后续同步。\n\n"
+            )
+        elif seq == 2:
+            phase_intro = (
+                f"【推送次序】{phase_label}（本会话第 2 封内部同步）\n"
+                "说明：本会话已向客服做过初次推送；本封为客户再次来信后的跟进同步，"
+                "便于掌握最新补充内容（如订单号、新描述等），请在原工单或会话基础上继续处理。\n\n"
+            )
+        else:
+            phase_intro = (
+                f"【推送次序】{phase_label}（本会话第 {seq} 封内部同步）\n"
+                "说明：同会话的再次升级同步，请结合历史推送与最新摘要继续跟进。\n\n"
+            )
+
         body = (
+            f"{phase_intro}"
             f"【客服升级通知】\n\n"
             f"以下工单需要您的关注：\n\n"
             f"{escalation_summary}\n\n"
         )
         if original_block:
             body += f"---\n{original_block}\n---\n"
+        closing = (
+            "请在本工单/会话基础上继续跟进处理。"
+            if seq >= 2
+            else "请尽快与该联系人跟进处理。"
+        )
         body += (
-            f"线程 ID：{thread_id}\n"
+            f"会话 ID：{thread_id}\n"
             f"联系人邮箱：{contact_email}\n"
             f"优先级建议：{priority}\n"
             f"品牌：{config.BRAND_NAME}\n\n"
-            f"请尽快与该联系人跟进处理。\n\n"
+            f"{closing}\n\n"
             f"{config.BRAND_SIGNATURE}"
         )
 
@@ -305,7 +343,7 @@ def send_internal_escalation(
         msg.attach(text_part)
         msg.attach(html_part)
 
-        logger.info(f"📤 发送内部升级通知 → {to_email} | 主题: {subject}")
+        logger.info(f"📤 发送内部升级通知（{phase_label}）→ {to_email} | 主题: {subject}")
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=context) as server:
             server.login(config.EMAIL_ADDRESS, config.EMAIL_PASSWORD)

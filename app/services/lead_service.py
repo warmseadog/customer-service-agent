@@ -1,5 +1,5 @@
 """
-lead_service.py — 意图/情绪流水读写服务
+lead_service.py — 意图/客诉分析读写服务
 
 注意：合作工单（leads）、CSV 导出等外呼相关功能已随重构移除。
 本文件仅保留 intent_results 相关操作，供 main.py 路由使用。
