@@ -52,6 +52,12 @@ class Config:
     BRAND_SIGNATURE: str = _get("BRAND_SIGNATURE", "The Partnership Team")
     # 发件人显示名（会出现在收件人的 From 字段，真实人名比纯邮箱地址可信度更高）
     SENDER_DISPLAY_NAME: str = _get("SENDER_DISPLAY_NAME", "Support Team")
+    # True：回复主题使用阿里邮箱网页同款「回复：」前缀（MIME 画像更接近手动网页回信）
+    MAIL_REPLY_SUBJECT_WEB_STYLE: bool = _get("MAIL_REPLY_SUBJECT_WEB_STYLE", "true").lower() not in (
+        "false",
+        "0",
+        "no",
+    )
 
     # Database（相对路径相对项目根目录）
     DB_FILE: str = _resolved_data_path("DB_FILE", "kol_agent.db")

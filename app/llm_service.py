@@ -19,6 +19,16 @@ from app.config import config
 
 logger = logging.getLogger(__name__)
 
+# 对外客户邮件：全文英文 + 降低营销模板感，减轻 Gmail 等对「混语种 / 群发促销体」的误判。
+CUSTOMER_REPLY_ENGLISH_ANTISPAM = """
+- **对外用语（硬性）：** 给客户看的正文必须**全文英文**，不得出现中文、日文等非英文字符；禁止中英混排。混语种易被归类为异常邮件。
+- **防垃圾邮件 / 避免营销模板感：** 写成真人同事发出的**简短事务邮件**，而非促销群发或话术填空模板。
+  - 避免空洞套话堆砌（如过量使用 “deeply apologize for any inconvenience”“your satisfaction is our priority”、无实质的多段致歉）。
+  - **不要用**促销邮件常见的刺眼编号清单体「(1)(2)(3)」或长项目符号块；索要订单号 / 产品 / 问题时用**两三句自然英文段落**，必要时仅用极简短行（如一行一个问题）。
+  - 产品称呼：沿用客户来信里的叫法或简短中性说法即可；勿全文照搬冗长电商 SEO 标题（除非核对 SKU 必需）。
+  - 少用全大写、少用多重感叹号；语气专业、直接、便于扫读。
+"""
+
 
 # ─── 底层 LLM 调用 ─────────────────────────────────────────────────────────────
 
@@ -231,7 +241,7 @@ def generate_calm_reply(
 {compensation_instruction}
 {escalation_note}
 
-4. 语气：谦抑、可信赖。篇幅以中文约 180–400 字为宜（英文可略长）。"""
+4. 语气：谦抑、可信赖。篇幅英文约 130–260 词为宜。"""
         else:
             style_block = f"""你是 {config.BRAND_NAME} 品牌的高级客服专员。对方**本信已提供单号+品名/产品**；**请勿再追问问题描述**。
 
@@ -243,11 +253,11 @@ def generate_calm_reply(
 {compensation_instruction}
 {escalation_note}
 
-3. 语气：专业、温暖、不施压。中文约 150–350 字。"""
+3. 语气：专业、温暖、不施压。篇幅英文约 110–220 词。"""
 
         other_common = f"""
 其它要求：
-- 语言镜像：**优先且默认使用英文（English）进行回复**。除非客户来信中其他语言（如中文）的文字占比非常高，否则一律使用英文。对于只有简短几个词（如 "fuck", "hello", "broken"）的来信，必须绝对使用英文。
+{CUSTOMER_REPLY_ENGLISH_ANTISPAM}
 - **本模式禁止**向客户**追加**索要**问题经过/问题描述/故障说明**；若其早期来信中已有不满，只表示感谢已记录并会一并转达。
 - 须针对其最新来信**具体**致谢，禁止空泛套话。
 - 长度：以简洁为主；激烈场景可略长但仍**不**追问题材料。
@@ -284,23 +294,23 @@ calm_mode: close_ack（**收尾、勿追问题**）
             logger.warning(f"⚠️ 安抚回复生成失败，使用模板兜底: {exc}")
             if intense_appeasement:
                 open_apology = (
-                    f"我们由衷地为给您带来的困扰与不安再次致歉。感谢您回复并提供订单与产品信息，我们非常重视您的反馈。"
+                    f"We’re truly sorry for the frustration this has caused. Thank you for sending your order and product details—we’ve noted everything carefully."
                 )
             else:
                 open_apology = (
-                    f"您好，{contact_name}。感谢您补充订单与产品信息，对给您造成的不便我们深表歉意。"
+                    f"Hello {contact_name}, thank you for your order and product details, and we’re sorry for the inconvenience."
                 )
             if after_sales_notified:
                 return (
                     f"Dear {contact_name},\n\n"
                     f"{open_apology}\n\n"
-                    f"我们已根据您提供的内容记录并同步售后，后续将由售后同事在约 1–2 个工作日内与您联系处理，**不再**重复向您索要问题描述。谢谢您的耐心与配合。\n\n"
+                    f"We’ve logged your information and notified after-sales. A teammate should reach out within about 1–2 business days. We won’t ask you to repeat your issue description again.\n\n"
                     f"{config.BRAND_SIGNATURE}"
                 )
             return (
                 f"Dear {contact_name},\n\n"
                 f"{open_apology}\n\n"
-                f"我们已记录您提供的订单与产品信息，将尽快由支持团队跟进。在此不再向您重复索要问题说明；若有新的补充，您也可以随时同线程回复我们。\n\n"
+                f"We’ve recorded your order and product details and our support team will follow up shortly. We won’t ask you to repeat the problem description here; reply anytime on this thread if something new comes up.\n\n"
                 f"{config.BRAND_SIGNATURE}"
             )
 
@@ -308,15 +318,9 @@ calm_mode: close_ack（**收尾、勿追问题**）
     if calm_mode == "initial_three":
         if product_resolved and product:
             info_step = f"""2. 本线程**首次**由我方**正式**回复。可关联产品「{product_name}」。
-   请**清晰、分条**请客户同时准备（**来信/历史中已写清的项，只感谢承接，勿重问**）：
-   (1) **订单编号**或有效购买/订单凭证；
-   (2) **产品名称/规格**（可请其**确认**与「{product_name}」是否一致，避免误导 SKU）；
-   (3) **问题描述**（问题现象、与期望的落差、是否曾尝试处理等；若**已在主诉或过往来信中写清**则只承接下来信，**勿**再列点要「再描述一次」）。"""
+   用**简短英文段落**说明尚需哪些材料（**来信/历史中已写清的项，只感谢承接，勿重问**）：订单编号或购买凭证；产品名称/规格（可请对方确认是否与「{product_name}」一致）；问题描述（若对方已写清则承接即可，勿要求其「再描述一遍」）。勿用 (1)(2)(3) 营销清单体。"""
         else:
-            info_step = """2. 本线程**首次**由我方**正式**回复。请**清晰、分条**向客户说明需补充（**已提供项只确认、勿重问**）：
-   (1) **订单编号**或有效购买/订单凭证；
-   (2) **产品名称**（全名/型号/渠道或套装，便于定位）；
-   (3) **问题描述**（具体现象、不满点与诉求；若**已写清**则只承接下来信、勿要对方重复叙述）。"""
+            info_step = """2. 本线程**首次**由我方**正式**回复。用**简短英文段落**说明尚需（**已提供项只确认、勿重问**）：订单编号或凭证；产品名称（型号/渠道等便于定位）；问题与诉求（若对方已写清则承接，勿要求其重复叙述）。勿用 (1)(2)(3) 营销清单体。"""
 
         if intense_appeasement:
             escalation_note = (
@@ -324,7 +328,7 @@ calm_mode: close_ack（**收尾、勿追问题**）
             )
         else:
             escalation_note = (
-                "- 共情 1–2 段后，用**可勾选感**的列表呈现三项，避免压迫感，但**务必**让对方理解首次需这三类信息以方便售后处理。"
+                "- 共情后用**英文自然段落**说明尚需的三类信息（订单、产品指称、问题），勿用促销邮件式编号清单；让对方清楚为何需要这些信息即可。"
             )
 
     # ─── 默认多轮：沿用「少问」与 product_resolved 分支 ───
@@ -345,11 +349,8 @@ calm_mode: close_ack（**收尾、勿追问题**）
    **问题或异常为可选**：对方已说清时致谢承接即可，**禁止**再列点追问「请进一步描述」；仅当对方几乎未提及时，可**一句**邀请补充，勿反复。
 3. 可简要说明有订单后售后能更快处理（勿暗示「必须同时」提供问题长文）。"""
         else:
-            info_step = """2. **务请客户补充信息**（用列表或分条，与客户语言一致；已提供的项只确认、勿重复索要）：
-   - **必索**：订单编号 / Order or purchase reference number（无则必须索取；已有则只确认）
-   - 产品信息（如产品名称、SKU/型号、购买渠道、套装规格等）/ Product name, SKU, where purchased（能推断或已说清则少问）
-   - 问题或异常为**可选**；已描述则勿再列点追问；仅几乎未提及时可一句带过
-3. 说明有订单后便于售后处理，勿给「三项都必须填完」的压迫感。"""
+            info_step = """2. **请客户补充信息**（用英文自然段落或极简短句；已提供的项只确认、勿重复索要）：必索订单编号；产品信息在其未说明时再问（名称/SKU/渠道等）；问题细节若已描述则勿再追问，几乎未提及时可一句带过。
+3. 说明有订单后便于售后处理，勿给「三项都必须填完」的压迫感；勿用促销邮件式项目符号大块列举。"""
 
     if calm_mode in ("default", "initial_three"):
         if intense_appeasement:
@@ -383,15 +384,15 @@ calm_mode: close_ack（**收尾、勿追问题**）
             )
         )
         len_hint = (
-            "激烈场景中文约 280–600 字、英文可略长；一般反馈中文约 200–450 字、英文约 120–250 词。"
+            "激烈场景英文约 180–320 词；一般反馈英文约 120–250 词。"
             if calm_mode == "default"
-            else "首次正式回复可略长以便列清 (1)–(3)；激烈场景中文约 280–650 字，一般约 220–500 字。"
+            else "首次正式回复可略长以便交代所需信息；激烈场景英文约 180–340 词，一般约 140–280 词。"
         )
 
         system_prompt = f"""{style_block}
 
 其它要求：
-- 语言镜像：**优先且默认使用英文（English）进行回复**。除非客户来信中其他语言（如中文）的文字占比非常高，否则一律使用英文。对于只有简短几个词（如 "fuck", "hello", "broken"）的来信，必须绝对使用英文。
+{CUSTOMER_REPLY_ENGLISH_ANTISPAM}
 - 须针对来信内容具体回应，禁止空泛套话。
 {extra_antiduplicate}
 - 长度：{len_hint}
@@ -432,16 +433,17 @@ calm_mode: {calm_mode}
             if calm_mode == "initial_three" and after_sales_notified:
                 return (
                     f"Dear {contact_name},\n\n"
-                    f"非常抱歉让您遇到不便。为尽快为您处理，请您在回复中**一并提供**下面三类信息："
-                    f"(1) **订单号或购买凭证**；(2) **产品全名/型号/规格**；(3) **问题描述**（现象与诉求；若上条信息已写清，请忽略重复描述）。\n"
-                    f"我们已将您的情况**同步**售后，预计约 1–2 个工作日内由售后同事与您联系。\n\n"
+                    f"We’re sorry for the trouble. To move quickly, please reply with your order or purchase proof, the product name/model, and a brief description of what went wrong "
+                    f"(skip anything you already explained above).\n\n"
+                    f"We’ve already looped in after-sales; someone should contact you within about 1–2 business days.\n\n"
                     f"{config.BRAND_SIGNATURE}"
                 )
             if calm_mode == "initial_three" and not after_sales_notified:
                 return (
                     f"Dear {contact_name},\n\n"
-                    f"非常抱歉。我们已为您建立专属服务档案，为了让工程师最快为您解决问题，请回复提供：(1) **订单号/购买凭证**；(2) **产品名称/型号**；(3) **问题与诉求的简要说明**"
-                    f"（若本邮件已写全，可仅确认，无需重述）。收到信息后我们将立刻安排专人接手处理。\n\n"
+                    f"We’re sorry this happened. We’ve opened a ticket for you—please reply with your order or purchase proof, the product name/model, and a short summary of the issue "
+                    f"(confirm only if you already covered it in your last message).\n\n"
+                    f"Once we have that, we’ll assign someone to take it forward.\n\n"
                     f"{config.BRAND_SIGNATURE}"
                 )
             if product_resolved and product:
@@ -515,15 +517,15 @@ def generate_normal_reply(
     satisfied_extra = ""
     if sentiment == "satisfied":
         satisfied_extra = """
-7. 【满意/致谢类来信专属】正文**最后一段之前**用**一两句**极委婉、可选的收尾（中文示例语气：「若您方便时在常用购买渠道留下几句真实体验，也会帮助其他朋友做参考——完全看您方便，我们同样感激。」英文示例：a gentle, optional line that a brief honest review could help others decide—entirely optional, no pressure）。禁止命令式、禁止索要好评截图、禁止占过长篇幅。"""
+7. 【满意/致谢类来信专属】正文**最后一段之前**用**一两句（英文）**极委婉、可选的收尾（例如：if you ever leave a brief honest note where you purchased, it can help others decide—entirely optional, no pressure）。禁止命令式、禁止索要好评截图、禁止占过长篇幅。"""
 
     system_prompt = f"""你是 {config.BRAND_NAME} 品牌的客服专员。采用谦恭、专业的邮件风格。
 
 回复要求：
-1. 语言镜像：**优先且默认使用英文（English）进行回复**。除非客户来信中其他语言（如中文）的文字占比非常高，否则一律使用英文。对于只有简短几个词（如 "fuck", "hello", "broken"）的来信，必须绝对使用英文。
+1. {CUSTOMER_REPLY_ENGLISH_ANTISPAM}
 2. 必须针对来信：感谢用户的反馈或直接回应需求。但对于具体的产品操作、功能设置、技术指导等“How-to”问题，**绝对不要自行编造或猜测操作步骤**。应当礼貌地告知客户：已将该咨询转交至技术/产品团队，他们会尽快提供准确的操作指引。
 3. 语气：温暖、专业；不夸大、不承诺无法兑现的赔偿（除非有明确政策）。
-4. 长度：英文约 80–180 词；中文约 150–320 字。
+4. 长度：英文约 80–180 词。
 5. 结尾署名：{config.BRAND_SIGNATURE}
 6. 只输出回复正文。
 {satisfied_extra}"""

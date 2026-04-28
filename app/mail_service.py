@@ -3,47 +3,74 @@ mail_service.py — 阿里企业邮箱 IMAP 收件 + SMTP 发件（客服场景�
 
 功能：
   1. fetch_unread_emails()        IMAP 拉取未读来信
-  2. send_reply()                 回复用户邮件（可 Cc 负责人；Thread 串联，防 Spam 头部）
+  2. send_reply()                 回复用户邮件（可 Cc 负责人；Thread 串联；MIME 对齐阿里网页投递画像）
   3. send_internal_escalation()   内部升级邮件（含原文+中译；按同线程推送次序标注「初次推送 / 第二次推送 / …」）
 
-防 Spam 设计：
+对外回复 MIME 策略（对齐阿里邮箱网页 Ding/Web 成功样本）：
+  - boundary：----=ALIBOUNDARY_*（非伪造 Outlook）
+  - parts：UTF-8 + base64（与网页一致）
+  - Message-ID：<uuid.support@域名>
+  - 不设虚假的 X-Mailer；网页同源 Reply-To
   - In-Reply-To + References 串联 Thread
-  - multipart/alternative 双格式
-  - X-Mailer 消除自动化指纹
 """
 
 import logging
+import re
 import smtplib
 import ssl
 import html as html_lib
 import uuid
-from datetime import datetime
 from email import charset as _charset_mod
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.header import decode_header as _decode_header_lib
-from email.utils import parseaddr, make_msgid, formataddr, formatdate
+from email.utils import parseaddr, formataddr, formatdate
 
-# quoted-printable 比 base64 更接近真实邮件客户端（Outlook/Gmail）的编码方式，
-# 能降低被 Gmail 内容过滤器识别为批量自动化邮件的概率。
-_UTF8_QP = _charset_mod.Charset("utf-8")
-_UTF8_QP.body_encoding = _charset_mod.QP
+# 阿里邮箱网页 multipart 常用 UTF-8 + base64 body（与用户手工成功信一致）。
+_UTF8_B64 = _charset_mod.Charset("utf-8")
+_UTF8_B64.body_encoding = _charset_mod.BASE64
 
 
-def _outlook_boundary() -> str:
-    """
-    生成与 Microsoft Outlook 格式相同的 MIME boundary。
-    Python email 库默认生成 '===============...==' 格式，
-    这是自动化脚本的显著指纹，会被反垃圾引擎直接识别。
-    Outlook 格式示例：----=_Part_a3f2b1c4_1745720012345
-    """
-    rand_hex = uuid.uuid4().hex[:8]
-    timestamp_ms = int(datetime.now().timestamp() * 1000)
-    return f"----=_Part_{rand_hex}_{timestamp_ms}"
+def _aliyun_web_boundary() -> str:
+    """对齐阿里邮箱网页 multipart boundary：----=ALIBOUNDARY_<n>_<hex>_<suffix>"""
+    n = uuid.uuid4().int % 9000 + 1000
+    mid = uuid.uuid4().hex[:12]
+    tail = uuid.uuid4().hex[:5]
+    return f"----=ALIBOUNDARY_{n}_{mid}_{tail}"
+
+
+def _web_like_message_id(domain: str) -> str:
+    """对齐网页端 Message-ID 形态：<uuid.support@domain>"""
+    return f"<{uuid.uuid4()}.support@{domain}>"
 
 from imap_tools import MailBox, AND
 
 from app.config import config
+
+_SUBJECT_REPLY_PREFIX = re.compile(r"^(?:re\s*:\s*|回复\s*[:：]\s*)+", re.IGNORECASE)
+
+
+def _strip_reply_subject_prefixes(subject: str) -> str:
+    s = (subject or "").strip()
+    while True:
+        m = _SUBJECT_REPLY_PREFIX.match(s)
+        if not m:
+            break
+        s = s[m.end() :].strip()
+    return s
+
+
+def _reply_subject_for_send(original_subject: str) -> str:
+    """构造回复主题：可选阿里网页同款「回复：」前缀（config.MAIL_REPLY_SUBJECT_WEB_STYLE）。"""
+    subj = original_subject or ""
+    if getattr(config, "MAIL_REPLY_SUBJECT_WEB_STYLE", True):
+        core = _strip_reply_subject_prefixes(subj)
+        return f"回复：{core}" if core else "回复："
+    low = subj.lower()
+    if low.startswith("re:"):
+        return subj
+    return f"Re: {subj}" if subj.strip() else "Re:"
+
 
 logger = logging.getLogger(__name__)
 
@@ -144,13 +171,13 @@ def send_reply(
     """
     通过阿里企业邮箱 SMTP 发送回复邮件。
 
-    防 Spam 关键操作（相比旧代码的核心改进）：
+    MIME 对齐网页 Ding/Web：boundary ALIBOUNDARY_*、UTF-8 base64 正文、
+    Message-ID（uuid.support@域名）、Reply-To 同源；不设虚假 X-Mailer。
+
+    Thread 串联：
     ┌─────────────────────────────────────────────────────────────────┐
     │  In-Reply-To: <原邮件 Message-ID>                               │
     │  References:  <原邮件 References 链> <原邮件 Message-ID>        │
-    │                                                                 │
-    │  这两个头部告诉 Gmail："这封邮件是对某个已知对话的合法回复"，    │
-    │  而不是一封陌生的外发邮件，从而绕过垃圾邮件过滤器。             │
     └─────────────────────────────────────────────────────────────────┘
 
     Args:
@@ -164,20 +191,23 @@ def send_reply(
     try:
         to_email = original["from_email"]
 
-        # 构造 Re: 主题（避免重复添加 Re:）
         subject = original["subject"]
-        reply_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+        reply_subject = _reply_subject_for_send(subject)
 
         # ── 构建 References 链 ─────────────────────────────────────────────
         orig_msg_id    = original["message_id"]
         orig_refs      = original.get("references", "").strip()
         new_references = f"{orig_refs} {orig_msg_id}".strip() if orig_refs else orig_msg_id
 
-        # ── 构造 multipart/alternative（HTML + 纯文本双版本） ──────────────
-        msg = MIMEMultipart("alternative", boundary=_outlook_boundary())
+        mail_domain = config.EMAIL_ADDRESS.split("@")[-1]
 
-        # From: 真实人名 + 邮箱（比单独邮箱地址可信度更高，不像机器发送）
-        msg["From"] = formataddr((config.SENDER_DISPLAY_NAME, config.EMAIL_ADDRESS))
+        # ── multipart/alternative：boundary / base64 / HTML 片段对齐阿里邮箱网页 ──
+        msg = MIMEMultipart("alternative", boundary=_aliyun_web_boundary())
+
+        from_hdr = formataddr((config.SENDER_DISPLAY_NAME, config.EMAIL_ADDRESS))
+        msg["From"] = from_hdr
+        # 网页端同源 Reply-To（成功样本含此头；勿伪造 Outlook）
+        msg["Reply-To"] = from_hdr
 
         # To: 保留原始收件人格式（含显示名）
         msg["To"] = original["from_raw"] or to_email
@@ -188,26 +218,18 @@ def send_reply(
 
         msg["Subject"]    = reply_subject
         msg["Date"]       = formatdate(localtime=True)
-        msg["Message-ID"] = make_msgid(domain=config.EMAIL_ADDRESS.split("@")[-1])
-        msg["X-Mailer"]   = "Microsoft Outlook 16.0"
+        msg["Message-ID"] = _web_like_message_id(mail_domain)
 
-        # ── Thread 串联头部（告知 Gmail 这是合法会话回复） ────────────────
+        # ── Thread 串联头部 ──────────────────────────────────────────────────
         msg["In-Reply-To"] = orig_msg_id
         msg["References"]  = new_references
 
-        # 注意：以下头部刻意省略，原因如下：
-        #   Reply-To   — 与 From 相同时是冗余且可疑的，真人 Gmail/Outlook 回复不带此头
-        #   Auto-Submitted — 加 "no" 反而是欺骗性信号，Gmail ML 可识别自动化模式
-        #   Importance / X-Priority — 营销/spam 邮件特征，真实商务邮件通常不携带
-
-        # ── 附加纯文本 part（必须在 HTML 之前，RFC 2046 规定后者优先显示） ──
-        # 使用 quoted-printable 编码：比 base64 更接近手动发出的商务邮件
-        text_part = MIMEText(reply_body, "plain", _UTF8_QP)
+        # 纯文本先行，HTML 后附（RFC 2046）；编码 UTF-8 base64 对齐网页 Ding/Web
+        text_part = MIMEText(reply_body, "plain", _UTF8_B64)
         msg.attach(text_part)
 
-        # ── 附加 HTML part（与真实邮件客户端行为一致） ─────────────────────
-        html_body = _text_to_html(reply_body, config.SENDER_DISPLAY_NAME)
-        html_part = MIMEText(html_body, "html", _UTF8_QP)
+        html_body = _text_to_html_aliyun_web(reply_body)
+        html_part = MIMEText(html_body, "html", _UTF8_B64)
         msg.attach(html_part)
 
         # ── SSL 连接并发送 ─────────────────────────────────────────────────
@@ -330,16 +352,16 @@ def send_internal_escalation(
             f"{config.BRAND_SIGNATURE}"
         )
 
-        msg = MIMEMultipart("alternative", boundary=_outlook_boundary())
+        md = config.EMAIL_ADDRESS.split("@")[-1]
+        msg = MIMEMultipart("alternative", boundary=_aliyun_web_boundary())
         msg["From"] = formataddr((config.SENDER_DISPLAY_NAME, config.EMAIL_ADDRESS))
         msg["To"] = formataddr((to_name or to_email, to_email))
         msg["Subject"] = subject
         msg["Date"] = formatdate(localtime=True)
-        msg["Message-ID"] = make_msgid(domain=config.EMAIL_ADDRESS.split("@")[-1])
-        msg["X-Mailer"] = "Microsoft Outlook 16.0"
+        msg["Message-ID"] = _web_like_message_id(md)
 
-        text_part = MIMEText(body, "plain", _UTF8_QP)
-        html_part = MIMEText(_text_to_html(body, config.SENDER_DISPLAY_NAME), "html", _UTF8_QP)
+        text_part = MIMEText(body, "plain", _UTF8_B64)
+        html_part = MIMEText(_text_to_html_aliyun_web(body), "html", _UTF8_B64)
         msg.attach(text_part)
         msg.attach(html_part)
 
@@ -357,60 +379,52 @@ def send_internal_escalation(
         return False
 
 
-# ─── HTML 生成辅助 ──────────────────────────────────────────────────────────────
-
-import re as _re
+# ─── HTML 生成辅助（对齐阿里邮箱网页 Ding/Web 正文片段，避免完整 HTML 文档 + 伪造客户端指纹） ─
 
 def _strip_html_tags(text: str) -> str:
     """移除 LLM 偶尔在纯文本正文里混入的 HTML 标签（<p>, <br>, <a> 等）。"""
-    # 先把 <br> / <br/> 转换为换行，再去掉其余所有标签
-    text = _re.sub(r'<br\s*/?>', '\n', text, flags=_re.IGNORECASE)
-    text = _re.sub(r'<[^>]+>', '', text)
-    # 修复 LLM 生成的 </p > 等畸形闭合标签产生的多余空格
-    text = _re.sub(r'\s{3,}', '\n\n', text)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\s{3,}", "\n\n", text)
     return text.strip()
 
 
-def _text_to_html(text: str, sender_name: str) -> str:
+def _text_to_html_aliyun_web(text: str) -> str:
     """
-    将纯文本正文转换为带基础样式的 HTML。
-
-    生成的 HTML 与 Outlook/Gmail Web 客户端发出的邮件格式高度相似，
-    能显著提升 Gmail 对邮件合法性的信任度。
-
-    注意：先对 LLM 输出做 strip_html_tags，避免把模型偶尔生成的
-    原始 HTML 标签直接暴露在 HTML part 里（会被 Gmail 视为异常格式）。
+    将纯文本转为阿里邮箱网页常见的 div/p 片段（无外层的完整 HTML 文档），
+    与 multipart/alternative + base64 组合形态更接近手动网页回信。
     """
     clean_text = _strip_html_tags(text)
     escaped = html_lib.escape(clean_text)
-    # 段落之间用空行分隔，每段用 <p> 包裹；行内换行用 <br>
     paragraphs = escaped.split("\n\n")
-    body_html = ""
+    chunks: list[str] = []
     for para in paragraphs:
         lines = para.strip()
-        if lines:
-            # 退订说明行用小字灰色样式区分
-            if lines.startswith("---"):
-                footer_content = lines[3:].strip()
-                body_html += (
-                    f'<p style="font-size:11px;color:#888888;border-top:1px solid #e5e5e5;'
-                    f'padding-top:12px;margin-top:24px;">'
-                    f'{footer_content.replace(chr(10), "<br>")}</p>\n'
-                )
-            else:
-                body_html += f"<p>{lines.replace(chr(10), '<br>')}</p>\n"
+        if not lines:
+            continue
+        if lines.startswith("---"):
+            footer_content = lines[3:].strip()
+            chunks.append(
+                '<p style="font-size:11px;color:rgb(136,136,136);border-top:1px solid rgb(229,229,229);'
+                'padding-top:12px;margin-top:24px;font-family:Arial,Helvetica,sans-serif;">'
+                f'{footer_content.replace(chr(10), "<br>")}</p>'
+            )
+        else:
+            chunks.append(
+                '<p style="color:rgb(34,34,34);font-family:Arial,Helvetica,sans-serif;'
+                'font-size:14px;line-height:1.6;margin:0 0 1em 0;">'
+                f'{lines.replace(chr(10), "<br>")}</p>'
+            )
+    inner = "".join(chunks)
+    return (
+        '<div class="__aliyun_email_body_block">'
+        '<div style="clear:both;font-family:Tahoma,Arial,STHeitiSC-Light,SimSun;font-size:14px;">'
+        f"{inner}"
+        "</div></div>"
+    )
 
-    return f"""\
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="font-family: Arial, Helvetica, sans-serif; font-size: 14px;
-             color: #222222; line-height: 1.6; margin: 0; padding: 20px;">
-  <div style="max-width: 600px;">
-    {body_html}
-  </div>
-</body>
-</html>"""
+
+def _text_to_html(text: str, sender_name: str = "") -> str:
+    """兼容旧调用；sender_name 保留不参与渲染。"""
+    del sender_name
+    return _text_to_html_aliyun_web(text)
