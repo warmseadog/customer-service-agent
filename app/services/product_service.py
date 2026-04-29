@@ -26,6 +26,13 @@ def normalize_product_payload(payload: dict) -> dict:
     normalized["owner_name"] = (payload.get("owner_name") or "").strip()
     normalized["owner_email"] = (payload.get("owner_email") or "").strip()
     normalized["fallback_owner_email"] = (payload.get("fallback_owner_email") or "").strip()
+    normalized["brand"] = (payload.get("brand") or "").strip()
+    normalized["asin"] = (payload.get("asin") or "").strip()
+    # 仪表盘已移除卖点/场景描述；未传则清空，避免旧数据在反复保存时残留
+    normalized["tagline"] = (payload.get("tagline") or "").strip()
+    normalized["scene"] = (payload.get("scene") or "").strip()
+    normalized["intro"] = (payload.get("intro") or "").strip()
+    normalized["description"] = (payload.get("description") or "").strip()
     return normalized
 
 

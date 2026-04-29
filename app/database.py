@@ -3,7 +3,7 @@ database.py — SQLite 持久化层
 
 表结构：
   1. 联系人主档（creators）
-  2. 产品库（products）含 owner 字段
+  2. 产品库（products）含 owner、brand 等字段
   3. 线程状态（kol_threads）
   4. 消息历史（thread_messages）
   5. 意图/情绪识别结果（intent_results）含 cs_sentiment/cs_tone/escalated
@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Any
 
 from app.config import config
+from app.thread_scope import SEP, scope_thread_id
+from app.mailbox_migrate import ensure_mailboxes_schema_and_migrate
 
 logger = logging.getLogger(__name__)
 
@@ -134,15 +136,17 @@ def _seed_products_if_needed(conn: sqlite3.Connection) -> None:
     now = _now_iso()
     for item in items:
         product_id = item.get("id") or item.get("asin") or f"seed-{abs(hash(item.get('name', '')))}"
+        seed_brand = (item.get("brand") or item.get("store_name") or "").strip()
         conn.execute(
             """
             INSERT OR IGNORE INTO products (
                 id, name, description, keywords, store_name, asin,
                 commission_rate, tagline, scene, intro, is_active,
                 owner_name, owner_email, fallback_owner_email,
+                brand,
                 created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(product_id),
@@ -158,6 +162,7 @@ def _seed_products_if_needed(conn: sqlite3.Connection) -> None:
                 item.get("owner_name", ""),
                 item.get("owner_email", ""),
                 item.get("fallback_owner_email", ""),
+                seed_brand,
                 now,
                 now,
             ),
@@ -411,10 +416,13 @@ def init_db() -> None:
     _ensure_column(conn, "products", "owner_name", "TEXT")
     _ensure_column(conn, "products", "owner_email", "TEXT")
     _ensure_column(conn, "products", "fallback_owner_email", "TEXT")
+    _ensure_column(conn, "products", "brand", "TEXT")
     # intent_results — customer service fields
     _ensure_column(conn, "intent_results", "cs_sentiment", "TEXT")
     _ensure_column(conn, "intent_results", "cs_tone", "TEXT")
     _ensure_column(conn, "intent_results", "escalated", "INTEGER NOT NULL DEFAULT 0")
+
+    ensure_mailboxes_schema_and_migrate(conn)
 
     _seed_support_staff_if_needed(conn)
     _seed_products_if_needed(conn)
@@ -425,49 +433,73 @@ def init_db() -> None:
 
 # ─── processed_messages ───────────────────────────────────────────────────────
 
-def is_message_processed(message_id: str) -> bool:
+def is_message_processed(message_id: str, mailbox_id: int | None = None) -> bool:
     conn = _get_conn()
-    row = conn.execute(
-        "SELECT 1 FROM processed_messages WHERE message_id = ?", (message_id,)
-    ).fetchone()
+    if mailbox_id is not None:
+        row = conn.execute(
+            "SELECT 1 FROM processed_messages WHERE mailbox_id = ? AND message_id = ?",
+            (mailbox_id, message_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT 1 FROM processed_messages WHERE message_id = ?", (message_id,)
+        ).fetchone()
     conn.close()
     return row is not None
 
 
-def mark_message_processed(message_id: str, thread_id: str) -> None:
+def mark_message_processed(
+    message_id: str, thread_id: str, mailbox_id: int | None = None
+) -> None:
     conn = _get_conn()
+    if mailbox_id is None:
+        row = conn.execute("SELECT id FROM mailboxes ORDER BY id LIMIT 1").fetchone()
+        mailbox_id = int(row["id"]) if row else 1
     conn.execute(
         """
-        INSERT OR IGNORE INTO processed_messages (message_id, thread_id, processed_at)
-        VALUES (?, ?, ?)
+        INSERT OR IGNORE INTO processed_messages (mailbox_id, message_id, thread_id, processed_at)
+        VALUES (?, ?, ?, ?)
         """,
-        (message_id, thread_id, _now_iso()),
+        (mailbox_id, message_id, thread_id, _now_iso()),
     )
     conn.commit()
     conn.close()
 
 
-def list_processed_messages(limit: int = 100) -> list[dict]:
+def list_processed_messages(limit: int = 100, mailbox_id: int | None = None) -> list[dict]:
     conn = _get_conn()
+    mq = " AND pm.mailbox_id = ? " if mailbox_id is not None else ""
+    params: list = []
+    if mailbox_id is not None:
+        params.append(mailbox_id)
+    params.append(limit)
     rows = conn.execute(
         """
         SELECT
+            pm.mailbox_id,
             pm.message_id,
             pm.thread_id,
             pm.processed_at,
             kt.kol_email,
             kt.kol_name,
             kt.intent_label,
+            IFNULL(mb.label, '') AS mailbox_label,
+            IFNULL(mb.email_address, '') AS mailbox_email,
             tm.subject,
             SUBSTR(tm.body, 1, 160) AS body_excerpt
         FROM processed_messages pm
+        LEFT JOIN mailboxes mb ON pm.mailbox_id = mb.id
         LEFT JOIN kol_threads kt ON pm.thread_id = kt.thread_id
         LEFT JOIN thread_messages tm
-            ON pm.message_id = tm.message_id AND tm.role = 'kol'
+            ON tm.thread_id = pm.thread_id AND tm.message_id = pm.message_id AND tm.role = 'kol'
+        WHERE 1=1
+        """
+        + mq
+        + """
         ORDER BY pm.processed_at DESC
         LIMIT ?
         """,
-        (limit,),
+        tuple(params),
     ).fetchall()
     conn.close()
     return _dicts(rows)
@@ -634,7 +666,7 @@ def get_product(product_id: str) -> dict | None:
 
 def upsert_product(data: dict) -> dict:
     now = _now_iso()
-    product_id = str(data.get("id") or data.get("asin") or "").strip()
+    product_id = str(data.get("id") or "").strip()
     if not product_id:
         raise ValueError("产品 ID 不能为空")
     name = (data.get("name") or "").strip()
@@ -644,6 +676,7 @@ def upsert_product(data: dict) -> dict:
     payload = {
         "id": product_id,
         "name": name,
+        "brand": (data.get("brand") or "").strip(),
         "description": (data.get("description") or "").strip(),
         "keywords": _json_dumps(data.get("keywords") or []),
         "store_name": (data.get("store_name") or config.BRAND_NAME).strip(),
@@ -664,19 +697,20 @@ def upsert_product(data: dict) -> dict:
     conn.execute(
         """
         INSERT INTO products (
-            id, name, description, keywords, store_name, asin,
+            id, name, brand, description, keywords, store_name, asin,
             commission_rate, tagline, scene, intro, is_active,
             owner_name, owner_email, fallback_owner_email,
             created_at, updated_at
         )
         VALUES (
-            :id, :name, :description, :keywords, :store_name, :asin,
+            :id, :name, :brand, :description, :keywords, :store_name, :asin,
             :commission_rate, :tagline, :scene, :intro, :is_active,
             :owner_name, :owner_email, :fallback_owner_email,
             :created_at, :updated_at
         )
         ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
+            brand = excluded.brand,
             description = excluded.description,
             keywords = excluded.keywords,
             store_name = excluded.store_name,
@@ -1195,7 +1229,7 @@ def list_collaboration_leads() -> list[dict]:
         LEFT JOIN campaigns cam ON cl.campaign_id = cam.id
         ORDER BY cl.updated_at DESC, cl.id DESC
         """
-    ).fetchall()
+        ).fetchall()
     conn.close()
     return _dicts(rows)
 
@@ -1271,11 +1305,29 @@ def upsert_thread_state(
     conn.close()
 
 
-def list_all_threads() -> list[dict]:
+def list_all_threads(mailbox_id: int | None = None) -> list[dict]:
     conn = _get_conn()
-    rows = conn.execute(
-        "SELECT * FROM kol_threads ORDER BY updated_at DESC"
-    ).fetchall()
+    if mailbox_id is not None:
+        rows = conn.execute(
+            """
+            SELECT kt.*, mb.label AS mailbox_label, mb.email_address AS mailbox_email
+            FROM kol_threads kt
+            LEFT JOIN mailboxes mb ON kt.mailbox_id = mb.id
+            WHERE kt.mailbox_id = ?
+            ORDER BY kt.updated_at DESC
+            """
+            ,
+            (mailbox_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT kt.*, mb.label AS mailbox_label, mb.email_address AS mailbox_email
+            FROM kol_threads kt
+            LEFT JOIN mailboxes mb ON kt.mailbox_id = mb.id
+            ORDER BY kt.updated_at DESC
+            """
+        ).fetchall()
     conn.close()
     return _dicts(rows)
 
@@ -1440,3 +1492,179 @@ def upsert_support_escalation_settings(
     conn.commit()
     conn.close()
     return get_support_escalation_settings()
+
+
+# --- mailboxes ---------------------------------------------------------------
+
+def _row_mailbox(row: sqlite3.Row | None) -> dict | None:
+    if not row:
+        return None
+    d = dict(row) if not isinstance(row, dict) else dict(row)
+    pw = d.get("password") or ""
+    d["has_password"] = bool(str(pw).strip())
+    d.pop("password", None)
+    d["mail_reply_subject_web_style"] = bool(d.get("mail_reply_subject_web_style", 1))
+    d["enabled"] = bool(d.get("enabled", 1))
+    d["smtp_use_ssl"] = bool(d.get("smtp_use_ssl", 1))
+    return d
+
+
+def get_mailbox_raw(mailbox_id: int) -> dict | None:
+    """含 password，仅供发信拉信用。"""
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM mailboxes WHERE id = ?", (mailbox_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_mailboxes() -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute("SELECT * FROM mailboxes ORDER BY id ASC").fetchall()
+    conn.close()
+    return [_row_mailbox(r) for r in rows]
+
+
+def list_enabled_mailboxes() -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM mailboxes WHERE enabled = 1 ORDER BY id ASC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]  # noqa: SIM115
+
+
+def insert_mailbox(payload: dict) -> dict:
+    now = _now_iso()
+    conn = _get_conn()
+    email = (payload.get("email_address") or "").strip()
+    if not email or "@" not in email:
+        conn.close()
+        raise ValueError("email_address required")
+    pw = (payload.get("password") or "").strip()
+    cur = conn.execute(
+        """
+        INSERT INTO mailboxes (
+            label, provider, email_address, password,
+            imap_host, imap_port, smtp_host, smtp_port, smtp_use_ssl,
+            brand_name, brand_signature, sender_display_name, mail_reply_subject_web_style,
+            enabled, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            (payload.get("label") or "").strip() or email,
+            (payload.get("provider") or "aliyun").strip(),
+            email,
+            pw,
+            (payload.get("imap_host") or "").strip(),
+            int(payload.get("imap_port") or 993),
+            (payload.get("smtp_host") or "").strip(),
+            int(payload.get("smtp_port") or 465),
+            1 if payload.get("smtp_use_ssl", True) else 0,
+            (payload.get("brand_name") or "").strip(),
+            (payload.get("brand_signature") or "").strip(),
+            (payload.get("sender_display_name") or "").strip(),
+            1 if payload.get("mail_reply_subject_web_style", True) else 0,
+            1 if payload.get("enabled", True) else 0,
+            now,
+            now,
+        ),
+    )
+    mid = int(cur.lastrowid)
+    conn.commit()
+    conn.close()
+    row = get_mailbox_raw(mid)
+    return _row_mailbox(row)
+
+
+def update_mailbox(mailbox_id: int, payload: dict) -> dict | None:
+    cur = get_mailbox_raw(mailbox_id)
+    if not cur:
+        return None
+    now = _now_iso()
+    sets = []
+    vals: list = []
+    mapping = {
+        "label": "label",
+        "provider": "provider",
+        "email_address": "email_address",
+        "imap_host": "imap_host",
+        "imap_port": "imap_port",
+        "smtp_host": "smtp_host",
+        "smtp_port": "smtp_port",
+        "brand_name": "brand_name",
+        "brand_signature": "brand_signature",
+        "sender_display_name": "sender_display_name",
+    }
+    if "smtp_use_ssl" in payload:
+        sets.append("smtp_use_ssl = ?")
+        vals.append(1 if payload.get("smtp_use_ssl") else 0)
+    if "enabled" in payload:
+        sets.append("enabled = ?")
+        vals.append(1 if payload.get("enabled") else 0)
+    if "mail_reply_subject_web_style" in payload:
+        sets.append("mail_reply_subject_web_style = ?")
+        vals.append(1 if payload.get("mail_reply_subject_web_style") else 0)
+    if "password" in payload:
+        pv = payload.get("password")
+        if isinstance(pv, str) and pv.strip():
+            sets.append("password = ?")
+            vals.append(pv.strip())
+    for py, db in mapping.items():
+        if py not in payload:
+            continue
+        sets.append(f"{db} = ?")
+        if py in ("imap_port", "smtp_port"):
+            vals.append(int(payload.get(py) or 0))
+        else:
+            vals.append(str(payload.get(py) or "").strip())
+
+    sets.append("updated_at = ?")
+    vals.append(now)
+    vals.append(mailbox_id)
+    if len(sets) <= 1:
+        row = get_mailbox_raw(mailbox_id)
+        return _row_mailbox(row) if row else None
+    conn = _get_conn()
+    sql = "UPDATE mailboxes SET " + ", ".join(sets) + " WHERE id = ?"
+    conn.execute(sql, vals)
+    conn.commit()
+    conn.close()
+    row = get_mailbox_raw(mailbox_id)
+    return _row_mailbox(row) if row else None
+
+
+def delete_mailbox(mailbox_id: int) -> bool:
+    conn = _get_conn()
+    n = conn.execute("DELETE FROM mailboxes WHERE id = ?", (mailbox_id,)).rowcount
+    conn.commit()
+    conn.close()
+    return n > 0
+
+
+def update_mailbox_check_status(
+    mailbox_id: int, *, last_error: str | None = None, last_checked_at: str | None = None
+) -> None:
+    conn = _get_conn()
+    if last_checked_at:
+        conn.execute(
+            """
+            UPDATE mailboxes SET last_checked_at = ?, last_error = ?, updated_at = ? WHERE id = ?
+            """
+            ,
+            (
+                last_checked_at,
+                last_error,
+                last_checked_at,
+                mailbox_id,
+            ),
+        )
+    elif last_error is not None:
+        conn.execute(
+            """
+            UPDATE mailboxes SET last_error = ?, updated_at = ? WHERE id = ?
+            """
+            ,
+            (last_error, _now_iso(), mailbox_id),
+        )
+    conn.commit()
+    conn.close()

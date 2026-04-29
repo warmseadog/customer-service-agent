@@ -4,7 +4,7 @@ mail_service.py — 阿里企业邮箱 IMAP 收件 + SMTP 发件（客服场景�
 功能：
   1. fetch_unread_emails()        IMAP 拉取未读来信
   2. send_reply()                 回复用户邮件（可 Cc 负责人；Thread 串联；MIME 对齐阿里网页投递画像）
-  3. send_internal_escalation()   内部升级邮件（含原文+中译；按同线程推送次序标注「初次推送 / 第二次推送 / …」）
+  3. send_internal_escalation()   内部升级邮件（前半简要摘要与索引；后半来信原文 + 中译）
 
 对外回复 MIME 策略（对齐阿里邮箱网页 Ding/Web 成功样本）：
   - boundary：----=ALIBOUNDARY_*（非伪造 Outlook）
@@ -60,18 +60,16 @@ def _strip_reply_subject_prefixes(subject: str) -> str:
     return s
 
 
-def _reply_subject_for_send(original_subject: str) -> str:
-    """构造回复主题：可选阿里网页同款「回复：」前缀（config.MAIL_REPLY_SUBJECT_WEB_STYLE）。"""
+def _reply_subject_for_send(original_subject: str, *, mail_reply_subject_web_style: bool = True) -> str:
     subj = original_subject or ""
-    if getattr(config, "MAIL_REPLY_SUBJECT_WEB_STYLE", True):
+    if mail_reply_subject_web_style:
         core = _strip_reply_subject_prefixes(subj)
-        return f"回复：{core}" if core else "回复："
+        return "回复：" + core if core else "回复："
     low = subj.lower()
     if low.startswith("re:"):
         return subj
-    return f"Re: {subj}" if subj.strip() else "Re:"
-
-
+    tail = subj.strip()
+    return "Re: " + tail if tail else "Re:"
 logger = logging.getLogger(__name__)
 
 
@@ -105,147 +103,89 @@ def parse_sender(from_header: str) -> tuple[str, str]:
 
 # ─── IMAP 收件 ─────────────────────────────────────────────────────────────────
 
-def fetch_unread_emails(limit: int = 20) -> list[dict]:
-    """
-    通过 IMAP 获取收件箱未读邮件，返回结构化字典列表。
-
-    每条字典包含：
-      uid, message_id(RFC-2822), thread_message_ids(References链),
-      subject, from_name, from_email, body, date
-    """
-    results = []
+def fetch_unread_emails(mailbox_row: dict, limit: int = 20) -> list[dict]:
+    results: list = []
     try:
-        logger.info(f"📡 连接 IMAP: {config.IMAP_HOST}:{config.IMAP_PORT}")
-        with MailBox(config.IMAP_HOST, config.IMAP_PORT).login(
-            config.EMAIL_ADDRESS, config.EMAIL_PASSWORD
-        ) as mb:
-            logger.info("✅ IMAP 登录成功")
-
-            # 搜索未读邮件，按时间正序取最新的 limit 封
+        host = (mailbox_row.get('imap_host') or '').strip()
+        port = int(mailbox_row.get('imap_port') or 993)
+        email_addr = (mailbox_row.get('email_address') or '').strip()
+        password = mailbox_row.get('password') or ''
+        mid = int(mailbox_row.get('id') or 0)
+        logger.info(f"IMAP {host}:{port} {email_addr}")
+        with MailBox(host, port).login(email_addr, password) as mb:
             msgs = list(mb.fetch(AND(seen=False), limit=limit, reverse=True))
-            logger.info(f"📬 发现 {len(msgs)} 封未读邮件")
-
+            logger.info(f"Unread {len(msgs)}")
             for msg in msgs:
-                # imap-tools 1.5.0: msg.headers 是 Dict[str, List[str]]
-                # 用安全的辅助函数取单个值
+
                 def _h(key: str) -> str:
                     vals = msg.headers.get(key) or []
-                    return vals[0].strip() if vals else ""
+                    return vals[0].strip() if vals else ''
 
                 from_raw = _h("from")
                 from_name, from_email = parse_sender(from_raw)
-
-                # RFC 2822 Message-ID（防 Spam 关键字段）
                 raw_msg_id = _h("message-id")
-
-                # References 链（用于串联整个 Thread）
                 references = _h("references")
-
-                body = msg.text or msg.html or ""
+                body = msg.text or msg.html or ''
 
                 results.append({
-                    "uid":        str(msg.uid),
+                    "uid": str(msg.uid),
                     "message_id": raw_msg_id,
                     "references": references,
-                    "subject":    decode_str(msg.subject or ""),
-                    "from_name":  from_name,
+                    "subject": decode_str(msg.subject or ""),
+                    "from_name": from_name,
                     "from_email": from_email,
-                    "from_raw":   from_raw,
-                    "body":       body.strip(),
-                    "date":       str(msg.date),
+                    "from_raw": from_raw,
+                    "body": body.strip(),
+                    "date": str(msg.date),
+                    "mailbox_id": mid,
                 })
 
     except Exception as e:
-        logger.error(f"❌ IMAP 收件失败: {e}", exc_info=True)
+        logger.error(f"IMAP fetch failed: {e}", exc_info=True)
 
     return results
 
-
-# ─── SMTP 发件（含防 Spam 头部） ───────────────────────────────────────────────
-
 def send_reply(
+    mailbox_row: dict,
     original: dict,
     reply_body: str,
     cc_emails: list[str] | None = None,
 ) -> bool:
-    """
-    通过阿里企业邮箱 SMTP 发送回复邮件。
-
-    MIME 对齐网页 Ding/Web：boundary ALIBOUNDARY_*、UTF-8 base64 正文、
-    Message-ID（uuid.support@域名）、Reply-To 同源；不设虚假 X-Mailer。
-
-    Thread 串联：
-    ┌─────────────────────────────────────────────────────────────────┐
-    │  In-Reply-To: <原邮件 Message-ID>                               │
-    │  References:  <原邮件 References 链> <原邮件 Message-ID>        │
-    └─────────────────────────────────────────────────────────────────┘
-
-    Args:
-        original:   由 fetch_unread_emails() 返回的原邮件字典
-        reply_body: 纯文本回复正文
-        cc_emails:  抄送地址列表（如产品负责人）
-
-    Returns:
-        bool: 发送成功返回 True
-    """
     try:
-        to_email = original["from_email"]
-
-        subject = original["subject"]
-        reply_subject = _reply_subject_for_send(subject)
-
-        # ── 构建 References 链 ─────────────────────────────────────────────
-        orig_msg_id    = original["message_id"]
-        orig_refs      = original.get("references", "").strip()
-        new_references = f"{orig_refs} {orig_msg_id}".strip() if orig_refs else orig_msg_id
-
-        mail_domain = config.EMAIL_ADDRESS.split("@")[-1]
-
-        # ── multipart/alternative：boundary / base64 / HTML 片段对齐阿里邮箱网页 ──
-        msg = MIMEMultipart("alternative", boundary=_aliyun_web_boundary())
-
-        from_hdr = formataddr((config.SENDER_DISPLAY_NAME, config.EMAIL_ADDRESS))
-        msg["From"] = from_hdr
-        # 网页端同源 Reply-To（成功样本含此头；勿伪造 Outlook）
-        msg["Reply-To"] = from_hdr
-
-        # To: 保留原始收件人格式（含显示名）
-        msg["To"] = original["from_raw"] or to_email
-
+        to_email = original['from_email']
+        subject = original['subject']
+        web_style = bool(mailbox_row.get('mail_reply_subject_web_style', 1))
+        reply_subject = _reply_subject_for_send(subject, mail_reply_subject_web_style=web_style)
+        orig_msg_id = original['message_id']
+        orig_refs = (original.get('references') or '').strip()
+        new_references = f'{orig_refs} {orig_msg_id}'.strip() if orig_refs else orig_msg_id
+        email_acc = (mailbox_row.get('email_address') or '').strip()
+        mail_domain = email_acc.split('@')[-1] if '@' in email_acc else 'localhost'
+        snd = (mailbox_row.get('sender_display_name') or 'Support').strip()
+        msg = MIMEMultipart('alternative', boundary=_aliyun_web_boundary())
+        from_hdr = formataddr((snd, email_acc))
+        msg['From'] = from_hdr
+        msg['Reply-To'] = from_hdr
+        msg['To'] = original.get('from_raw') or to_email
         cc_list = [e.strip() for e in (cc_emails or []) if e and str(e).strip()]
         if cc_list:
-            msg["Cc"] = ", ".join(cc_list)
-
-        msg["Subject"]    = reply_subject
-        msg["Date"]       = formatdate(localtime=True)
-        msg["Message-ID"] = _web_like_message_id(mail_domain)
-
-        # ── Thread 串联头部 ──────────────────────────────────────────────────
-        msg["In-Reply-To"] = orig_msg_id
-        msg["References"]  = new_references
-
-        # 纯文本先行，HTML 后附（RFC 2046）；编码 UTF-8 base64 对齐网页 Ding/Web
-        text_part = MIMEText(reply_body, "plain", _UTF8_B64)
+            msg['Cc'] = ', '.join(cc_list)
+        msg['Subject'] = reply_subject
+        msg['Date'] = formatdate(localtime=True)
+        msg['Message-ID'] = _web_like_message_id(mail_domain)
+        msg['In-Reply-To'] = orig_msg_id
+        msg['References'] = new_references
+        text_part = MIMEText(reply_body, 'plain', _UTF8_B64)
         msg.attach(text_part)
-
-        html_body = _text_to_html_aliyun_web(reply_body)
-        html_part = MIMEText(html_body, "html", _UTF8_B64)
+        html_part = MIMEText(_text_to_html_aliyun_web(reply_body), 'html', _UTF8_B64)
         msg.attach(html_part)
-
-        # ── SSL 连接并发送 ─────────────────────────────────────────────────
-        log_cc = f" | Cc: {cc_list}" if cc_list else ""
-        logger.info(f"📤 发送回复 → {to_email}{log_cc} | 主题: {reply_subject}")
-        logger.info(f"   In-Reply-To: {orig_msg_id[:60]}")
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=context) as server:
-            server.login(config.EMAIL_ADDRESS, config.EMAIL_PASSWORD)
-            server.send_message(msg)
-
-        logger.info(f"✅ 发送成功 → {to_email}")
+        log_cc = f' | Cc: {cc_list}' if cc_list else ''
+        logger.info(f'send reply -> {to_email}{log_cc} subj={reply_subject}')
+        _smtp_send_message(mailbox_row, msg)
+        logger.info('sent ok -> %s', to_email)
         return True
-
     except Exception as e:
-        logger.error(f"❌ SMTP 发送失败: {e}", exc_info=True)
+        logger.error('SMTP send_reply failed: %s', e, exc_info=True)
         return False
 
 
@@ -261,6 +201,7 @@ def _escalation_push_label(push_sequence: int) -> str:
 
 def send_internal_escalation(
     *,
+    mailbox_row: dict,
     to_email: str,
     to_name: str,
     thread_id: str,
@@ -274,15 +215,17 @@ def send_internal_escalation(
     push_sequence: int = 1,
 ) -> bool:
     """
-    向产品负责人发送内部客服升级通知邮件。
+    向产品负责人发送内部升级通知邮件。
+
+    正文结构：前半为简短推送标签 + LLM 摘要 + 极简索引行；后半为来信原文与中文译文，末尾一行跟进提示。
 
     Args:
         to_email:              收件人邮箱（产品 owner_email 或 DEFAULT_SUPPORT_OWNER_EMAIL）
         to_name:               收件人姓名
         thread_id:             会话 ID（邮件线程 key，排障用）
-        contact_name:          触发升级的联系人姓名
+        contact_name:          触发升级的联系人姓名（用于主题行）
         contact_email:         触发升级的联系人邮箱
-        product_name:          绑定产品名称
+        product_name:          绑定产品名称（用于主题行）
         priority:              优先级建议（如 high / medium）
         escalation_summary:    由 LLM 生成的 ≤5 行摘要
         original_message:      用户来信原文（任意语种，节选）
@@ -312,49 +255,50 @@ def send_internal_escalation(
         else:
             original_block = ""
 
-        if seq == 1:
-            phase_intro = (
-                f"【推送次序】{phase_label}（本会话第 1 封内部同步）\n"
-                "说明：本会话首次因客诉/不满等向客服推送，便于尽早知晓并建档；"
-                "若客户尚未提供订单号等，后续来信可能还会收到「第二次推送」及后续同步。\n\n"
-            )
-        elif seq == 2:
-            phase_intro = (
-                f"【推送次序】{phase_label}（本会话第 2 封内部同步）\n"
-                "说明：本会话已向客服做过初次推送；本封为客户再次来信后的跟进同步，"
-                "便于掌握最新补充内容（如订单号、新描述等），请在原工单或会话基础上继续处理。\n\n"
-            )
-        else:
-            phase_intro = (
-                f"【推送次序】{phase_label}（本会话第 {seq} 封内部同步）\n"
-                "说明：同会话的再次升级同步，请结合历史推送与最新摘要继续跟进。\n\n"
-            )
+        # 前半：推送标签 + 摘要 + 极简索引；后半：来信原文与译文（不加冗长说明）
+        phase_one_liner = (
+            f"【推送】{phase_label} · 本会话第 {seq} 封"
+            + (" · 客户再次来信跟进" if seq >= 2 else " · 首次同步")
+            + "\n\n"
+        )
 
-        body = (
-            f"{phase_intro}"
-            f"【客服升级通知】\n\n"
-            f"以下工单需要您的关注：\n\n"
-            f"{escalation_summary}\n\n"
-        )
-        if original_block:
-            body += f"---\n{original_block}\n---\n"
-        closing = (
-            "请在本工单/会话基础上继续跟进处理。"
-            if seq >= 2
-            else "请尽快与该联系人跟进处理。"
-        )
-        body += (
+        brand_disp = (mailbox_row.get("brand_name") or "").strip() or config.BRAND_NAME
+        # 索引行尽量短（摘要里已有联系人/产品等）；后半仍为全文原文 + 译文
+        brief_meta = (
             f"会话 ID：{thread_id}\n"
             f"联系人邮箱：{contact_email}\n"
-            f"优先级建议：{priority}\n"
-            f"品牌：{config.BRAND_NAME}\n\n"
-            f"{closing}\n\n"
-            f"{config.BRAND_SIGNATURE}"
+            f"优先级：{priority} · 品牌：{brand_disp}\n\n"
         )
 
-        md = config.EMAIL_ADDRESS.split("@")[-1]
+        body = (
+            f"{phase_one_liner}"
+            f"【摘要】\n"
+            f"{escalation_summary.strip()}\n\n"
+            f"{brief_meta}"
+            f"————————————————————\n"
+            f"以下为来信原文与中文译文\n"
+            f"————————————————————\n\n"
+        )
+        if original_block:
+            body += original_block.rstrip() + "\n\n"
+        else:
+            body += "（本封未附带原文节选，请以摘要与会话 ID 排查后台或邮箱线程。）\n\n"
+        closing = (
+            "请结合摘要与全文在原会话或工单上继续处理。"
+            if seq >= 2
+            else "请尽快跟进。"
+        )
+        body += (
+            f"————————————————————\n"
+            f"{closing}\n\n"
+            f"{(mailbox_row.get('brand_signature') or '').strip() or config.BRAND_SIGNATURE}"
+        )
+
+        email_acc = (mailbox_row.get('email_address') or '').strip()
+        md = email_acc.split('@')[-1] if '@' in email_acc else 'localhost'
         msg = MIMEMultipart("alternative", boundary=_aliyun_web_boundary())
-        msg["From"] = formataddr((config.SENDER_DISPLAY_NAME, config.EMAIL_ADDRESS))
+        snd = (mailbox_row.get('sender_display_name') or config.SENDER_DISPLAY_NAME).strip()
+        msg['From'] = formataddr((snd, email_acc))
         msg["To"] = formataddr((to_name or to_email, to_email))
         msg["Subject"] = subject
         msg["Date"] = formatdate(localtime=True)
@@ -365,13 +309,9 @@ def send_internal_escalation(
         msg.attach(text_part)
         msg.attach(html_part)
 
-        logger.info(f"📤 发送内部升级通知（{phase_label}）→ {to_email} | 主题: {subject}")
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT, context=context) as server:
-            server.login(config.EMAIL_ADDRESS, config.EMAIL_PASSWORD)
-            server.send_message(msg)
-
-        logger.info(f"✅ 内部升级通知发送成功 → {to_email}")
+        logger.info("internal escalation %s -> %s", phase_label, to_email)
+        _smtp_send_message(mailbox_row, msg)
+        logger.info("internal escalation sent -> %s", to_email)
         return True
 
     except Exception as exc:
@@ -428,3 +368,22 @@ def _text_to_html(text: str, sender_name: str = "") -> str:
     """兼容旧调用；sender_name 保留不参与渲染。"""
     del sender_name
     return _text_to_html_aliyun_web(text)
+
+def _smtp_send_message(mailbox_row: dict, msg: MIMEMultipart) -> None:
+    ctx = ssl.create_default_context()
+    host = (mailbox_row.get('smtp_host') or '').strip()
+    port = int(mailbox_row.get('smtp_port') or 465)
+    user = (mailbox_row.get('email_address') or '').strip()
+    pw = mailbox_row.get('password') or ''
+    use_ssl = bool(mailbox_row.get('smtp_use_ssl', 1))
+    if use_ssl:
+        with smtplib.SMTP_SSL(host, port, context=ctx) as s:
+            s.login(user, pw)
+            s.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port) as s:
+            s.starttls(context=ctx)
+            s.login(user, pw)
+            s.send_message(msg)
+
+

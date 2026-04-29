@@ -41,11 +41,14 @@ class Config:
     SMTP_HOST: str = _get("SMTP_HOST", "smtp.qiye.aliyun.com")
     SMTP_PORT: int = _int("SMTP_PORT", 465)
 
-    # LLM
+    # LLM（默认 OpenRouter + Gemini；换供应商改 LLM_BASE_URL / LLM_MODEL）
     LLM_API_KEY: str = _get("LLM_API_KEY")
-    LLM_BASE_URL: str = _get("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-    LLM_MODEL: str = _get("LLM_MODEL", "qwen-plus")
+    LLM_BASE_URL: str = _get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
+    LLM_MODEL: str = _get("LLM_MODEL", "google/gemini-3.1-pro-preview")
     LLM_TIMEOUT: int = _int("LLM_TIMEOUT", 60)
+    # OpenRouter 可选自愿头（映射 HTTP-Referer、X-OpenRouter-Title）：https://openrouter.ai/docs
+    LLM_HTTP_REFERER: str = _get("LLM_HTTP_REFERER")
+    LLM_APP_TITLE: str = _get("LLM_APP_TITLE")
 
     # Brand
     BRAND_NAME: str = _get("BRAND_NAME", "Our Brand")
@@ -98,6 +101,18 @@ class Config:
     PORT: int = _int("PORT", 8000)
     POLL_INTERVAL: int = _int("POLL_INTERVAL", 120)
     MAX_EMAILS_PER_CYCLE: int = _int("MAX_EMAILS_PER_CYCLE", 20)
+    # 每轮检查时并行连接 IMAP 的上限（1=顺序拉取）；多邮箱时拉大以缩短单轮耗时，过大可能触发邮服/NAT 限连
+    _mw = _int("MAILBOX_FETCH_MAX_WORKERS", 8)
+    MAILBOX_FETCH_MAX_WORKERS: int = max(1, min(64, _mw))
+    # 本条回信之前线程内我方回信数 ≥ 该阈值时，安抚对外采用 empathy_pure（不重复售后时间线套话）；范围 1–32
+    _emp = _int("CALM_EMPATHY_ONLY_MIN_PRIOR_OUTBOUND", 3)
+    CALM_EMPATHY_ONLY_MIN_PRIOR_OUTBOUND: int = max(1, min(32, _emp))
+    # 进程启动后是否立即开启定时轮询（需手动 POST /stop-auto 才会停）
+    AUTO_START_POLLING: bool = _get("AUTO_START_POLLING", "true").lower() not in (
+        "false",
+        "0",
+        "no",
+    )
 
 
 config = Config()

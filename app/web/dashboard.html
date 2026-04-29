@@ -88,7 +88,7 @@ textarea{min-height:90px;resize:vertical}
   <div class="top">
     <div class="hero">
       <h1>客服邮件工作台</h1>
-      <p>自动处理用户来信：情绪分析、安抚回复、将需跟进内容通知产品负责人。全局 <strong>兜底收件人</strong> 与<strong>可分配负责人名单</strong>请在「内部客服」页配置。系统仅被动接收入站邮件。</p>
+      <p>进程<strong>启动后默认开启收件轮询</strong>，仅在点击「停止轮询」或<strong>关闭进程</strong>后停止；可在「邮箱账户」绑定多台站点邮箱（阿里云企业邮、Gmail、Outlook、Yahoo、163 等，按需填写 IMAP/SMTP）。全局 <strong>兜底收件人</strong> 与<strong>可分配负责人名单</strong>请在「内部客服」页配置。系统仅被动接收入站邮件。</p>
     </div>
     <div class="controls">
       <button class="success" onclick="api('POST','/start-auto',null,this)">启动轮询</button>
@@ -104,6 +104,7 @@ textarea{min-height:90px;resize:vertical}
     <div class="card"><div class="label">内部客服</div><div class="value" id="sum-handlers">0</div></div>
     <div class="card"><div class="label">客诉分析记录</div><div class="value" id="sum-intents">0</div></div>
     <div class="card"><div class="label">内部通知</div><div class="value" id="sum-escalations">0</div></div>
+    <div class="card"><div class="label">邮箱账户</div><div class="value" id="sum-mailboxes">0</div></div>
   </div>
 
   <div class="tabs">
@@ -112,6 +113,7 @@ textarea{min-height:90px;resize:vertical}
     <button class="tab" onclick="switchTab('intents',this)">客诉分析</button>
     <button class="tab" onclick="switchTab('products',this)">产品库</button>
     <button class="tab" onclick="switchTab('internal',this)">内部客服</button>
+    <button class="tab" onclick="switchTab('mailboxes',this)">邮箱账户</button>
     <button class="tab" onclick="switchTab('logs',this)">运行日志</button>
   </div>
 
@@ -121,6 +123,13 @@ textarea{min-height:90px;resize:vertical}
       <div class="box">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
           <h3>会话概览</h3>
+        <div style="margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:12px;color:#94a3b8">当前邮箱</label>
+          <select id="mailbox-filter" onchange="loadInbox()" style="max-width:340px;margin:0">
+            <option value="">全部</option>
+          </select>
+          <span id="mailbox-meta" class="muted small"></span>
+        </div>
           <button class="danger small" onclick="deleteAllThreads()">清空全部会话</button>
         </div>
         <div id="thread-list" class="list"><div class="empty">加载中...</div></div>
@@ -172,9 +181,13 @@ textarea{min-height:90px;resize:vertical}
         <h3>新增 / 更新产品</h3>
         <div class="muted" style="margin-bottom:12px">产品<strong>负责人</strong>为<strong>内部同事</strong>，用于收<strong>内部通知</strong>。请先在「内部客服」页维护可分配名单，再在此选择；也可选「其他」后手动填写内部邮箱。</div>
         <div class="two-col">
-          <div><label>产品 ID *</label><input id="product-id" placeholder="P001 或 ASIN"></div>
+          <div><label>产品 ID *</label><input id="product-id" placeholder="内部编号，如 P001"></div>
           <div><label>产品名称 *</label><input id="product-name" placeholder="产品名称"></div>
         </div>
+        <label>ASIN（可选）</label>
+        <input id="product-asin" placeholder="亚马逊等平台 ASIN，与上方产品 ID 分开填写">
+        <label>品牌（可选）</label>
+        <input id="product-brand" placeholder="每条产品线可有独立品牌，用于话术与内部摘要展示">
         <div class="two-col">
           <div>
             <label>内部负责人</label>
@@ -194,12 +207,8 @@ textarea{min-height:90px;resize:vertical}
         <input type="hidden" id="product-owner-name" value="">
         <label>备用负责人邮箱（可选）</label>
         <input id="product-fallback-email" placeholder="另一内部邮箱（负责人缺席时）">
-        <div class="two-col">
-          <div><label>一句话卖点</label><input id="product-tagline" placeholder="产品核心卖点"></div>
-          <div><label>关键词</label><input id="product-keywords" placeholder="home, sleep, fitness"></div>
-        </div>
-        <label>场景 / 描述</label>
-        <textarea id="product-desc" placeholder="产品描述、使用场景"></textarea>
+        <label>关键词（匹配来信用语）</label>
+        <input id="product-keywords" placeholder="英文或中文关键词，逗号分隔，例：home, sleep, fitness, 筋膜枪">
         <button onclick="saveProduct()">保存产品</button>
       </div>
       <div class="box">
@@ -218,14 +227,14 @@ textarea{min-height:90px;resize:vertical}
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:16px;flex:1">
           <h3 style="margin:0">产品列表</h3>
-          <input type="text" id="product-search" placeholder="搜索产品 ID / 名称 / 负责人..." style="max-width:260px;margin:0;padding:6px 12px;font-size:13px;border-radius:8px;" oninput="filterProducts()">
+          <input type="text" id="product-search" placeholder="搜索 ID / 品牌 / 名称 / 负责人..." style="max-width:280px;margin:0;padding:6px 12px;font-size:13px;border-radius:8px;" oninput="filterProducts()">
         </div>
         <button class="danger small" onclick="deleteAllProducts()">清空全部产品</button>
       </div>
       <div class="table-wrap">
         <table class="tbl">
-          <thead><tr><th>ID</th><th>名称</th><th>内部负责人</th><th>内部邮箱</th><th>关键词</th><th>操作</th></tr></thead>
-          <tbody id="product-rows"><tr><td colspan="6" class="empty">加载中...</td></tr></tbody>
+          <thead><tr><th>ID</th><th>品牌</th><th>名称</th><th>ASIN</th><th>内部负责人</th><th>内部邮箱</th><th>关键词</th><th>操作</th></tr></thead>
+          <tbody id="product-rows"><tr><td colspan="8" class="empty">加载中...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -306,6 +315,75 @@ textarea{min-height:90px;resize:vertical}
   </section>
 
   <!-- 日志 -->
+
+  <section id="tab-mailboxes" class="panel">
+    <div class="grid">
+      <div class="box">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:10px">
+          <div>
+            <h3>新增 / 编辑邮箱</h3>
+            <p class="muted" style="margin:6px 0 0;font-size:12px">保存后轮询将按「已启用」账户依次拉取未读。编辑时密码留空表示不改密码。</p>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'aliyun\')">阿里企业邮</button>
+            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'gmail\')">Gmail</button>
+            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'outlook\')">Outlook/Hotmail</button>
+            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'outlook365\')">Microsoft 365</button>
+            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'yahoo\')">Yahoo</button>
+            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'163\')">网易 163</button>
+            <button type="button" class="secondary small" onclick="clearMailboxForm()">清空表单</button>
+          </div>
+          <p class="muted" style="margin:0 0 12px;font-size:11px;line-height:1.45">多数服务商需在邮箱设置里开启 IMAP/SMTP；Gmail/Yahoo/M365 常使用<strong>应用专用密码</strong>而非账号登录密码。SMTP 端口 <strong>587</strong> 时请<strong>取消勾选「SMTP 使用 SSL」</strong>（走 STARTTLS）。</p>
+        </div>
+        <input type="hidden" id="mb-id" value="">
+        <label>显示名称</label>
+        <input id="mb-label" placeholder="例如：品牌A 客服邮" autocomplete="off">
+        <div class="two-col">
+          <div>
+            <label>提供商</label>
+            <select id="mb-provider"><option value="aliyun">阿里云企业邮</option><option value="gmail">Gmail</option><option value="yahoo">Yahoo</option><option value="163">网易 163</option><option value="other">其他 / Outlook</option></select>
+          </div>
+          <div>
+            <label>登录邮箱 *</label>
+            <input id="mb-email" type="email" autocomplete="off">
+          </div>
+        </div>
+        <label>密码（编辑时留空不修改）</label>
+        <input id="mb-password" type="password" autocomplete="new-password">
+        <div class="two-col">
+          <div><label>IMAP 主机</label><input id="mb-imap-host"></div>
+          <div><label>IMAP 端口</label><input id="mb-imap-port" type="number" value="993"></div>
+        </div>
+        <div class="two-col">
+          <div><label>SMTP 主机</label><input id="mb-smtp-host"></div>
+          <div><label>SMTP 端口</label><input id="mb-smtp-port" type="number" value="465"></div>
+        </div>
+        <div class="two-col">
+          <div><label><input id="mb-smtp-ssl" type="checkbox" checked> SMTP 使用 SSL（常见 465）</label></div>
+          <div><label><input id="mb-enabled" type="checkbox" checked> 启用轮询</label></div>
+        </div>
+        <label><input id="mb-reply-zh" type="checkbox" checked> 回复主题「回复：」网页风格</label>
+        <div class="two-col">
+          <div><label>品牌名</label><input id="mb-brand-name" placeholder="对外/内部通知展示"></div>
+          <div><label>发件人显示名</label><input id="mb-sender" placeholder="Support Team"></div>
+        </div>
+        <label>品牌签名</label>
+        <input id="mb-brand-sig" placeholder="结尾署名">
+        <button type="button" onclick="saveMailboxForm()">保存</button>
+      </div>
+      <div class="box">
+        <h3>已配置账户</h3>
+        <p class="muted" style="margin:0 0 12px;font-size:12px">「测试」会尝试 IMAP 读取未读（可无未读）。</p>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead><tr><th>ID</th><th>名称 / 邮箱</th><th>IMAP</th><th>启用</th><th>最后检查 / 错误</th><th>操作</th></tr></thead>
+            <tbody id="mailbox-rows"><tr><td colspan="6" class="empty">加载中</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="tab-logs" class="panel">
     <div class="box">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
@@ -356,6 +434,169 @@ async function api(method,url,body,btn=null){
   }
 }
 
+async function loadMailboxAccounts(){
+  try{
+    const d=await fetchJson('/mailboxes');
+    window._mailboxList=d.mailboxes||[];
+    const sel=document.getElementById('mailbox-filter');
+    if(sel){
+      const cur=sel.value;
+      let html='<option value="">全部</option>';
+      for(const m of window._mailboxList){
+        html+='<option value="'+String(m.id)+'">'+(m.label||m.email_address||m.id)+' — '+esc(m.email_address||'')+'</option>';
+      }
+      sel.innerHTML=html;
+      if(cur!==undefined&&cur!==''){
+        const opts=[...sel.options].map(o=>o.value);
+        if(opts.includes(cur)) sel.value=cur;
+      }
+    }
+    const tbody=document.getElementById('mailbox-rows');
+    if(!tbody) return;
+    const rows=window._mailboxList;
+    if(!rows.length){tbody.innerHTML='<tr><td colspan="6" class="empty">暂无邮箱，请在左侧添加</td></tr>';return;}
+    tbody.innerHTML=rows.map(m=>{
+      const chk=m.enabled?'<span class="pill satisfied">是</span>':'<span class="pill not-escalated">否</span>';
+      const lc=(m.last_checked_at||'').slice(0,16);
+      const err=(m.last_error||'').trim();
+      const st=err?('<span class="muted" style="color:#fca5a5">'+esc(err.slice(0,80))+'</span>'):(lc||'—');
+      return '<tr><td class="muted">'+m.id+'</td><td><strong>'+esc(m.label||'')+'</strong><div class="muted small">'+esc(m.email_address||'')+'</div></td><td class="muted small">'+esc(m.imap_host||'')+':'+esc(String(m.imap_port||''))+'</td><td>'+chk+'</td><td class="small">'+esc(lc||'')+(lc?'<br>':'')+st+'</td><td><button type="button" class="secondary small" onclick="editMailboxRow('+m.id+')">编辑</button> <button type="button" class="secondary small" onclick="testMailboxRow('+m.id+',this)">测试</button> <button type="button" class="danger small" onclick="deleteMailboxRow('+m.id+')">删除</button></td></tr>';
+    }).join('');
+  }catch(err){console.error(err);}
+}
+function fillMailboxTemplate(kind){
+  const ssl=document.getElementById('mb-smtp-ssl');
+  if(kind==='aliyun'){
+    document.getElementById('mb-provider').value='aliyun';
+    document.getElementById('mb-imap-host').value='imap.qiye.aliyun.com';
+    document.getElementById('mb-imap-port').value='993';
+    document.getElementById('mb-smtp-host').value='smtp.qiye.aliyun.com';
+    document.getElementById('mb-smtp-port').value='465';
+    if(ssl) ssl.checked=true;
+  }else if(kind==='gmail'){
+    document.getElementById('mb-provider').value='gmail';
+    document.getElementById('mb-imap-host').value='imap.gmail.com';
+    document.getElementById('mb-imap-port').value='993';
+    document.getElementById('mb-smtp-host').value='smtp.gmail.com';
+    document.getElementById('mb-smtp-port').value='465';
+    if(ssl) ssl.checked=true;
+  }else if(kind==='outlook'){
+    document.getElementById('mb-provider').value='other';
+    document.getElementById('mb-imap-host').value='imap-mail.outlook.com';
+    document.getElementById('mb-imap-port').value='993';
+    document.getElementById('mb-smtp-host').value='smtp-mail.outlook.com';
+    document.getElementById('mb-smtp-port').value='587';
+    if(ssl) ssl.checked=false;
+  }else if(kind==='outlook365'){
+    document.getElementById('mb-provider').value='other';
+    document.getElementById('mb-imap-host').value='outlook.office365.com';
+    document.getElementById('mb-imap-port').value='993';
+    document.getElementById('mb-smtp-host').value='smtp.office365.com';
+    document.getElementById('mb-smtp-port').value='587';
+    if(ssl) ssl.checked=false;
+  }else if(kind==='yahoo'){
+    document.getElementById('mb-provider').value='yahoo';
+    document.getElementById('mb-imap-host').value='imap.mail.yahoo.com';
+    document.getElementById('mb-imap-port').value='993';
+    document.getElementById('mb-smtp-host').value='smtp.mail.yahoo.com';
+    document.getElementById('mb-smtp-port').value='465';
+    if(ssl) ssl.checked=true;
+  }else if(kind==='163'){
+    document.getElementById('mb-provider').value='163';
+    document.getElementById('mb-imap-host').value='imap.163.com';
+    document.getElementById('mb-imap-port').value='993';
+    document.getElementById('mb-smtp-host').value='smtp.163.com';
+    document.getElementById('mb-smtp-port').value='465';
+    if(ssl) ssl.checked=true;
+  }
+}
+function clearMailboxForm(){
+  document.getElementById('mb-id').value='';
+  ['mb-label','mb-email','mb-password','mb-imap-host','mb-smtp-host','mb-brand-name','mb-brand-sig','mb-sender'].forEach(id=>{const el=document.getElementById(id);if(el) el.value='';});
+  document.getElementById('mb-imap-port').value='993';
+  document.getElementById('mb-smtp-port').value='465';
+  document.getElementById('mb-provider').value='aliyun';
+  const ssl=document.getElementById('mb-smtp-ssl');if(ssl) ssl.checked=true;
+  document.getElementById('mb-enabled').checked=true;
+  document.getElementById('mb-reply-zh').checked=true;
+}
+function editMailboxRow(id){
+  const m=(window._mailboxList||[]).find(x=>x.id===id);
+  if(!m)return;
+  document.getElementById('mb-id').value=String(id);
+  document.getElementById('mb-label').value=m.label||'';
+  document.getElementById('mb-provider').value=m.provider||'aliyun';
+  document.getElementById('mb-email').value=m.email_address||'';
+  document.getElementById('mb-password').value='';
+  document.getElementById('mb-imap-host').value=m.imap_host||'';
+  document.getElementById('mb-imap-port').value=m.imap_port!=null?String(m.imap_port):'993';
+  document.getElementById('mb-smtp-host').value=m.smtp_host||'';
+  document.getElementById('mb-smtp-port').value=m.smtp_port!=null?String(m.smtp_port):'465';
+  document.getElementById('mb-smtp-ssl').checked=!!m.smtp_use_ssl;
+  document.getElementById('mb-enabled').checked=!!m.enabled;
+  document.getElementById('mb-reply-zh').checked=!!m.mail_reply_subject_web_style;
+  document.getElementById('mb-brand-name').value=m.brand_name||'';
+  document.getElementById('mb-brand-sig').value=m.brand_signature||'';
+  document.getElementById('mb-sender').value=m.sender_display_name||'';
+  const tabs=document.querySelectorAll('.tab');
+  for(let i=0;i<tabs.length;i++){
+    const t=tabs[i];
+    if(String(t.getAttribute('onclick')||'').includes("'mailboxes'")){switchTab('mailboxes',t);break;}
+  }
+}
+async function saveMailboxForm(){
+  const mid=document.getElementById('mb-id').value.trim();
+  const body={
+    label:document.getElementById('mb-label').value.trim(),
+    provider:document.getElementById('mb-provider').value||'aliyun',
+    email_address:document.getElementById('mb-email').value.trim(),
+    password:document.getElementById('mb-password').value,
+    imap_host:document.getElementById('mb-imap-host').value.trim(),
+    imap_port:parseInt(document.getElementById('mb-imap-port').value,10)||993,
+    smtp_host:document.getElementById('mb-smtp-host').value.trim(),
+    smtp_port:parseInt(document.getElementById('mb-smtp-port').value,10)||465,
+    smtp_use_ssl:document.getElementById('mb-smtp-ssl').checked,
+    enabled:document.getElementById('mb-enabled').checked,
+    mail_reply_subject_web_style:document.getElementById('mb-reply-zh').checked,
+    brand_name:document.getElementById('mb-brand-name').value.trim(),
+    brand_signature:document.getElementById('mb-brand-sig').value.trim(),
+    sender_display_name:document.getElementById('mb-sender').value.trim(),
+  };
+  if(!body.email_address){showBanner('请填写登录邮箱',false);return;}
+  if(!mid && !body.password){showBanner('新建邮箱请填写密码',false);return;}
+  try{
+    if(mid){
+      const put={...body};
+      if(!put.password || !put.password.trim()) delete put.password;
+      await fetchJson('/mailboxes/'+encodeURIComponent(mid),{method:'PUT',body:JSON.stringify(put)});
+    }else{
+      await fetchJson('/mailboxes',{method:'POST',body:JSON.stringify(body)});
+    }
+    showBanner('邮箱已保存',true);
+    clearMailboxForm();
+    await loadAll();
+  }catch(err){showBanner('保存失败: '+err.message,false);}
+}
+async function testMailboxRow(id,btn){
+  const old=btn&&btn.textContent;
+  if(btn){btn.disabled=true;btn.textContent='测试中...';}
+  try{
+    const r=await fetchJson('/mailboxes/'+encodeURIComponent(id)+'/test',{method:'POST'});
+    showBanner('连接成功，拉取预览 '+r.peek_count+' 封',true);
+  }catch(err){showBanner('测试失败: '+err.message,false);}
+  finally{if(btn){btn.disabled=false;btn.textContent=old||'测试';}}
+}
+async function deleteMailboxRow(id){
+  if(!confirm('确定删除该邮箱配置？相关会话数据仍保留，但不会再轮询此账户。'))return;
+  try{
+    await fetchJson('/mailboxes/'+encodeURIComponent(id),{method:'DELETE'});
+    showBanner('已删除',true);
+    const mf=document.getElementById('mailbox-filter');
+    if(mf&&String(mf.value)===String(id)) mf.value='';
+    clearMailboxForm();
+    await loadAll();
+  }catch(err){showBanner('删除失败: '+err.message,false);}
+}
 async function handleRefresh(btn){
   const oldText=btn.textContent;
   btn.disabled=true;
@@ -392,15 +633,25 @@ async function loadStatus(){
   if(handlerEl) handlerEl.textContent=s.support_staff??0;
   document.getElementById('sum-intents').textContent=s.intents??0;
   document.getElementById('sum-escalations').textContent=s.escalations??0;
+  const smb=document.getElementById('sum-mailboxes');
+  if(smb) smb.textContent=data.mailbox_count??0;
   const defaultEl=document.getElementById('sum-default-owner');
   if(defaultEl) defaultEl.textContent=escOwnerDisplay(data.default_support_owner);
 }
 
 async function loadInbox(){
+  const mf=document.getElementById('mailbox-filter');
+  const mb=mf&&mf.value?String(mf.value).trim():'';
+  const qs=mb?('?mailbox_id='+encodeURIComponent(mb)):'';
   const [threadsData, intentsData] = await Promise.all([
-    fetchJson('/kols'),
+    fetchJson('/kols'+qs),
     fetchJson('/intents?limit=10'),
   ]);
+  const mm=document.getElementById('mailbox-meta');
+  if(mm){
+    if(threadsData.mailbox_id!=null&&threadsData.mailbox_id!=='')mm.textContent='已筛选邮箱 ID '+threadsData.mailbox_id;
+    else mm.textContent='';
+  }
 
   // Thread list
   const threadEl=document.getElementById('thread-list');
@@ -653,10 +904,12 @@ function filterProducts(){
 async function loadProducts(){
   const data=await fetchJson('/products');
   const tbody=document.getElementById('product-rows');
-  if(!data.products.length){tbody.innerHTML='<tr><td colspan="6" class="empty">暂无产品</td></tr>';return;}
+  if(!data.products.length){tbody.innerHTML='<tr><td colspan="8" class="empty">暂无产品</td></tr>';return;}
   tbody.innerHTML=data.products.map(p=>`<tr>
     <td>${esc(p.id)}</td>
+    <td class="muted small">${esc(p.brand||'—')}</td>
     <td>${esc(p.name)}</td>
+    <td class="muted small">${esc(p.asin||'—')}</td>
     <td>${esc(p.owner_name||'—')}</td>
     <td class="muted small">${esc(p.owner_email||'—')}</td>
     <td class="small">${esc((p.keywords||[]).slice(0,4).join(', '))}</td>
@@ -670,11 +923,11 @@ async function loadProducts(){
 
 function prefillProduct(p){
   document.getElementById('product-id').value=p.id||'';
+  document.getElementById('product-asin').value=p.asin||'';
   document.getElementById('product-name').value=p.name||'';
+  document.getElementById('product-brand').value=p.brand||'';
   document.getElementById('product-fallback-email').value=p.fallback_owner_email||'';
-  document.getElementById('product-tagline').value=p.tagline||'';
   document.getElementById('product-keywords').value=(p.keywords||[]).join(', ');
-  document.getElementById('product-desc').value=p.description||p.intro||'';
   const em=(p.owner_email||'').trim().toLowerCase();
   const name=(p.owner_name||'').trim();
   const sel=document.getElementById('product-owner-select');
@@ -722,14 +975,18 @@ async function saveProduct(){
     ownerName=(opt&&opt.textContent)?opt.textContent.trim():'';
   }
   await api('POST','/products',{
-    id:document.getElementById('product-id').value,
+    id:document.getElementById('product-id').value.trim(),
+    asin:document.getElementById('product-asin').value.trim(),
     name:document.getElementById('product-name').value,
+    brand:document.getElementById('product-brand').value.trim(),
     owner_name:ownerName,
     owner_email:ownerEmail,
     fallback_owner_email:document.getElementById('product-fallback-email').value,
-    tagline:document.getElementById('product-tagline').value,
+    tagline:'',
+    scene:'',
+    intro:'',
+    description:'',
     keywords:splitList(document.getElementById('product-keywords').value),
-    description:document.getElementById('product-desc').value,
     is_active:true,
   });
 }
@@ -820,7 +1077,7 @@ async function saveEscalationSettings(){
 async function loadAll(){
   try{
     await loadStatus();
-    await Promise.all([loadEscalationForm(),loadInbox(),loadEscalations(),loadIntents(),loadSupportStaff(),loadProducts(),loadLogs()]);
+    await Promise.all([loadMailboxAccounts(),loadEscalationForm(),loadInbox(),loadEscalations(),loadIntents(),loadSupportStaff(),loadProducts(),loadLogs()]);
     clearBanner();
   }catch(err){
     showBanner('加载失败: '+err.message,false);

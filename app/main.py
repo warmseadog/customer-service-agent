@@ -24,15 +24,20 @@ from app.database import (
     delete_all_data,
     delete_all_escalation_events,
     delete_escalation_event,
+    delete_mailbox,
     delete_support_staff,
     delete_thread,
+    get_mailbox_raw,
     get_thread_messages,
     init_db,
+    insert_mailbox,
     insert_support_staff,
     list_all_threads,
     list_escalation_events,
+    list_mailboxes,
     list_processed_messages,
     list_support_staff,
+    update_mailbox,
 )
 from app.mail_service import fetch_unread_emails
 from app.services.lead_service import (
@@ -95,15 +100,23 @@ def _raise_server_error(exc: BaseException) -> None:
 async def lifespan(app: FastAPI):
     init_db()
     logger.info("🚀 客服邮件工作台启动")
-    logger.info(f"   品牌: {config.BRAND_NAME}")
-    logger.info(f"   邮箱: {config.EMAIL_ADDRESS}")
+    mbs = list_mailboxes()
+    logger.info(f"   已配置邮箱账户数: {len(mbs)}")
     logger.info(f"   LLM:  {config.LLM_MODEL} @ {config.LLM_BASE_URL}")
     _esc = settings_api_dict()
     logger.info(
         f"   全局兜底收件人(生效): {_esc['effective_default_email'] or '（未配置）'}"
     )
     logger.info("   Dashboard: http://localhost:8000/dashboard")
+    if config.AUTO_START_POLLING:
+        if _start_polling_background():
+            logger.info("   定时轮询：已默认开启（停止需 POST /stop-auto 或进程退出）")
+        else:
+            logger.info("   定时轮询：已在运行（跳过重复启动）")
+    else:
+        logger.info("   定时轮询：未自动开启（AUTO_START_POLLING=false）")
     yield
+    await _stop_polling_background(log_stop=False)
     logger.info("👋 服务已关闭")
 
 
@@ -124,6 +137,34 @@ async def _polling_loop():
         except Exception as exc:
             logger.error(f"❌ 轮询异常: {exc}", exc_info=True)
         await asyncio.sleep(config.POLL_INTERVAL)
+
+
+def _start_polling_background() -> bool:
+    """启动后台轮询任务；已在运行时返回 False。"""
+    global _bg_task, _is_running
+    if _is_running:
+        return False
+    _is_running = True
+    _bg_task = asyncio.create_task(_polling_loop())
+    logger.info(f"🤖 已启动后台轮询，间隔 {config.POLL_INTERVAL} 秒")
+    return True
+
+
+async def _stop_polling_background(*, log_stop: bool = True) -> None:
+    """取消轮询任务（用于手动停止或服务关闭）。"""
+    global _bg_task, _is_running
+    if not _bg_task:
+        _is_running = False
+        return
+    _is_running = False
+    _bg_task.cancel()
+    try:
+        await _bg_task
+    except asyncio.CancelledError:
+        pass
+    _bg_task = None
+    if log_stop:
+        logger.info("⏹️ 已停止后台轮询")
 
 
 def _summary() -> dict:
@@ -157,8 +198,10 @@ async def get_status():
     return {
         "auto_polling": _is_running,
         "poll_interval_seconds": config.POLL_INTERVAL,
-        "email_account": config.EMAIL_ADDRESS,
-        "brand": config.BRAND_NAME,
+        "auto_start_polling_default": config.AUTO_START_POLLING,
+        "email_accounts": [x["email_address"] for x in list_mailboxes()],
+        "mailbox_count": len(list_mailboxes()),
+        "global_brand": config.BRAND_NAME,
         "llm_model": config.LLM_MODEL,
         "default_support_owner": esc["effective_default_email"],
         "summary": _summary(),
@@ -186,25 +229,17 @@ async def put_escalation_settings_api(payload: dict):
 
 @app.post("/start-auto")
 async def start_auto():
-    global _bg_task, _is_running
     if _is_running:
-        return {"status": "already_running"}
-    _is_running = True
-    _bg_task = asyncio.create_task(_polling_loop())
-    logger.info(f"🤖 已启动后台轮询，间隔 {config.POLL_INTERVAL} 秒")
+        return {"status": "already_running", "poll_interval_seconds": config.POLL_INTERVAL}
+    _start_polling_background()
     return {"status": "started", "poll_interval_seconds": config.POLL_INTERVAL}
 
 
 @app.post("/stop-auto")
 async def stop_auto():
-    global _bg_task, _is_running
-    if not _is_running:
+    if not _is_running and not _bg_task:
         return {"status": "not_running"}
-    _is_running = False
-    if _bg_task:
-        _bg_task.cancel()
-        _bg_task = None
-    logger.info("⏹️ 已停止后台轮询")
+    await _stop_polling_background(log_stop=True)
     return {"status": "stopped"}
 
 
@@ -221,12 +256,18 @@ async def check_now():
 
 
 @app.get("/emails")
-async def list_emails(limit: int = 10):
+async def list_emails(limit: int = 10, mailbox_id: int = 1):
     try:
-        emails = fetch_unread_emails(limit=limit)
+        row = get_mailbox_raw(mailbox_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="mailbox not found")
+        emails = fetch_unread_emails(row, limit=limit)
+    except HTTPException:
+        raise
     except Exception as exc:
         _raise_server_error(exc)
     return {
+        "mailbox_id": mailbox_id,
         "count": len(emails),
         "emails": [
             {
@@ -239,6 +280,55 @@ async def list_emails(limit: int = 10):
             for item in emails
         ],
     }
+
+
+
+# ─── 邮箱账户 ───────────────────────────────────────────────────────────────────
+
+@app.get("/mailboxes")
+async def mailboxes_list():
+    return {"mailboxes": list_mailboxes()}
+
+
+@app.post("/mailboxes")
+async def mailboxes_create(payload: dict):
+    try:
+        row = insert_mailbox(payload)
+        return {"status": "ok", "mailbox": row}
+    except Exception as exc:
+        _raise_bad_request(exc)
+
+
+@app.put("/mailboxes/{mailbox_id}")
+async def mailboxes_update(mailbox_id: int, payload: dict):
+    try:
+        row = update_mailbox(mailbox_id, payload)
+        if not row:
+            raise HTTPException(status_code=404, detail="mailbox not found")
+        return {"status": "ok", "mailbox": row}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_bad_request(exc)
+
+
+@app.delete("/mailboxes/{mailbox_id}")
+async def mailboxes_delete(mailbox_id: int):
+    if not delete_mailbox(mailbox_id):
+        raise HTTPException(status_code=404, detail="mailbox not found")
+    return {"status": "deleted", "id": mailbox_id}
+
+
+@app.post("/mailboxes/{mailbox_id}/test")
+async def mailbox_test(mailbox_id: int):
+    row = get_mailbox_raw(mailbox_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="mailbox not found")
+    try:
+        items = fetch_unread_emails(row, limit=1)
+        return {"status": "ok", "mailbox_id": mailbox_id, "peek_count": len(items)}
+    except Exception as exc:
+        _raise_server_error(exc)
 
 
 # ─── 产品库（含 owner 字段，1A 唯一维护入口） ───────────────────────────────────
@@ -347,9 +437,9 @@ async def delete_all_escalations_api():
 # ─── 客户会话（技术字段 thread_id）────────────────────────────────────────────
 
 @app.get("/kols")
-async def list_kols():
-    threads = list_all_threads()
-    return {"count": len(threads), "kols": threads}
+async def list_kols(mailbox_id: int | None = None):
+    threads = list_all_threads(mailbox_id=mailbox_id)
+    return {"count": len(threads), "kols": threads, "mailbox_id": mailbox_id}
 
 
 @app.get("/thread/{thread_id}")
@@ -374,8 +464,8 @@ async def clear_all_threads_api():
 # ─── 已处理邮件 ─────────────────────────────────────────────────────────────────
 
 @app.get("/processed")
-async def list_processed(limit: int = 100):
-    records = list_processed_messages(limit=limit)
+async def list_processed(limit: int = 100, mailbox_id: int | None = None):
+    records = list_processed_messages(limit=limit, mailbox_id=mailbox_id)
     return {"count": len(records), "records": records}
 
 

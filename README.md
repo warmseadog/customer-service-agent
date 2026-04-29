@@ -38,13 +38,14 @@
 | **情绪与语气分析** | 每封来信自动分析 sentiment（满意/中性/不满意）和 tone（配合/强硬/敌对） |
 | **安抚回复生成** | 不满/强硬/敌对时发安抚信：**语气 hostile** 用高共情、优先道歉 + 必索信息；**配合/强硬** 用专业克制、正常询证 + 必索信息 |
 | **普通客服回复** | 满意/中性+配合时直接回答问题；**满意**时在结尾极委婉提示「若愿意分享体验可帮助他人参考」（零施压） |
-| **安抚少问策略** | 已识别到产品时，安抚信**必索订单号/凭证**，问题描述**非必索**；已提供的信息不重复追问 |
+| **安抚少问策略** | 已识别到产品时，安抚信**必索订单号/凭证**，问题描述**非必索**；已提供的信息不重复追问；**多轮后**（我方回信数 ≥ `CALM_EMPATHY_ONLY_MIN_PRIOR_OUTBOUND`，默认 3）对客户**不重复**售后时间线空话，短篇共情为主（`empathy_pure`） |
 | **全局兜底收件人（团队侧）** | `DEFAULT_SUPPORT_OWNER_EMAIL`（.env）或仪表盘**「内部客服」**页内配置；未命中产品或产品无负责人时作为兜底 |
 | **内部通知路由** | 安抚类先发内部通知再回用户；一般不满→**产品 owner 链**；情绪激烈（hostile）→直接送达**产品 owner 链或全局兜底收件人**；含摘要与原文节选 |
 | **升级冷却保护** | 同线程升级邮件在冷却时间内不重复发送，避免刷屏 |
 | **产品匹配** | 线程已绑定产品优先使用，否则用关键词匹配产品库兜底 |
 | **多轮对话记忆** | 按邮件线程（Thread）隔离存储完整收发历史，最多送 LLM N 条 |
 | **Web 仪表盘** | 客户会话、内部通知、客诉分析、产品库、**内部客服**（可分配负责人名单 + 备用/兜底收件人）、日志 |
+| **多邮箱收件** | 在仪表盘「邮箱账户」配置多台；每轮检查时 **IMAP 并行拉取**（详见 `MAILBOX_FETCH_MAX_WORKERS`），来信处理仍为顺序执行 |
 
 ---
 
@@ -76,6 +77,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ├── app/
 │   ├── agent.py              # 来信处理核心：收信→分析情绪→升级判断→发回复→写升级记录
 │   ├── config.py             # 环境变量统一读取（含客服配置项）
+│   ├── escalation_settings.py # 全局兜底收件人：DB 覆盖层 + effective 取值
 │   ├── database.py           # SQLite 持久化层
 │   ├── llm_service.py        # LLM 调用：情绪分析 + 回复生成 + 升级摘要
 │   ├── mail_service.py       # IMAP 收件 + SMTP 发件（用户回复 & 内部升级通知）
@@ -104,7 +106,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | 表名 | 职责 |
 |---|---|
 | `creators` | 联系人主档：邮箱、姓名等；**来信处理时会自动 upsert**，仪表盘不提供手工增删客户 |
-| `products` | 产品库：名称、关键词、卖点、**负责人 owner_name / owner_email** |
+| `products` | 产品库：名称、**brand（品牌）**、**asin**、关键词、**负责人 owner_name / owner_email** |
 | `support_staff` | 内部可分配人员：姓名、邮箱；**仪表盘「内部客服」名单**与产品负责人下拉数据源 |
 | `kol_threads` | 邮件线程状态：情绪标签、最后处理消息、绑定产品 |
 | `thread_messages` | 多轮对话历史：每封来信和我方回复 |
@@ -127,10 +129,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | sent_at | TEXT | 发送时间 |
 | created_at | TEXT | 记录创建时间 |
 
-### `products` — 产品负责人字段（1A 维护入口）
+### `products` — 产品与负责人字段（仪表盘维护）
 
 | 字段 | 说明 |
 |---|---|
+| `brand` | 品牌名称（可选；不同产品可属不同品牌，用于话术与展示「品牌 · 品名」） |
 | `owner_name` | 产品负责人姓名 |
 | `owner_email` | 升级通知首选收件邮箱 |
 | `fallback_owner_email` | owner_email 为空时的备用邮箱 |
@@ -157,17 +160,18 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## 内部升级邮件说明
 
-升级邮件主题格式：`[客服升级] {联系人姓名} — {产品名称}`
+升级邮件主题格式：`[客服升级·{推送次序}] {联系人姓名} — {产品名称}`，其中「推送次序」为 `初次推送` / `第二次推送` / `第N次推送`（同会话内多次发给内部的升级通知）。
 
 邮件内容包含：
-- 线程 ID
+- 【推送次序】说明（同上，便于区分本会话第几封内部同步）
+- 线程 ID（会话排障）
 - 联系人姓名与邮箱
 - 绑定产品名称
 - 优先级建议（high / medium）
-- LLM 生成的 ≤5 行摘要
-- 升级触发原因
+- LLM 生成的 ≤5 行摘要（及可选的用户原文节选、中文译文段落等，见 `mail_service.send_internal_escalation`）
+- 【客服升级通知】正文摘要
 
-**升级冷却**：同一线程在 `ESCALATION_EMAIL_COOLDOWN_MINUTES` 分钟内不重复发送升级通知（防止刷屏）。
+**升级冷却**：同一线程在 `ESCALATION_EMAIL_COOLDOWN_MINUTES` 分钟内不重复发送升级通知（防止刷屏）。安抚路径下发内部通知时可经 `CALM_BYPASS_ESCALATION_COOLDOWN`（默认开启）跳过冷却，避免与用户侧可见话术（如「已联系售后」）不同步。
 
 ---
 
@@ -182,7 +186,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | **客诉分析** | 每封来信的 sentiment / tone / 是否已转内部 |
 | **产品库** | 产品增删改，含 owner_name / owner_email 维护（1A） |
 | **内部客服** | **同一页**包含：① **可分配负责人名单**（姓名、内部企业邮箱，对应 `support_staff`）；② **全局兜底收件人**（与 `GET/PUT /settings/escalation` 一致）。编辑区为 **一行两列**：「兜底 · 邮箱 | 兜底 · 称呼」，少占纵向空间 |
+| **邮箱账户** | 多台站点邮箱：分别填写 IMAP/SMTP；仪表盘含阿里云企业邮、Gmail、Outlook/Hotmail、Microsoft 365、Yahoo、网易 163 等一键模板 |
 | **运行日志** | 最近 200 条运行日志（接口 `GET /logs?tail=200`），每 6 秒自动刷新 |
+
+进程启动后默认**开启收件轮询**（环境变量 `AUTO_START_POLLING=true`）；仅在仪表盘点击「停止轮询」或结束进程后停止。设为 `false` 时需手动调用 `POST /start-auto`。启动定时轮询时会打印间隔秒数；每完成一轮检查，日志中会输出本轮耗时及 IMAP 并行 worker（对应 `MAILBOX_FETCH_MAX_WORKERS`，便于调优）。
 
 **说明**：已不再提供「来函客户」类手工客户表维护；`creators` 仅由收信流程按需写入，用于会话与升级展示关联。
 
@@ -193,10 +200,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | 端点 | 说明 |
 |---|---|
 | `GET /dashboard` | Web 仪表盘 |
-| `POST /check` | 立即触发一轮来信检查 |
-| `POST /start-auto` | 启动后台定时轮询 |
-| `POST /stop-auto` | 停止后台轮询 |
-| `GET /status` | 服务状态与汇总数据（`summary`：`support_staff` / `products` / `intents` / `escalations` 等；含生效的全局收件邮箱） |
+| `POST /check` | 立即触发一轮来信检查；若上一轮检查（含后台定时轮询中的 `run_check_cycle`）仍在执行，`asyncio.Lock` 未释放，返回 **409 Conflict**：`已有检查任务正在后台运行，请勿重复点击` |
+| `POST /start-auto` | 启动后台定时轮询（进程默认已自动开启时返回 `already_running`） |
+| `POST /stop-auto` | 停止后台轮询（停止后需再次调用 `/start-auto` 才会恢复） |
+| `GET /status` | 服务状态（含 `auto_polling`、`auto_start_polling_default`、`poll_interval_seconds`、汇总数据等） |
 | `GET /settings/escalation` | 全局 DEFAULT：数据库覆盖值、生效值、.env 对照（body 与仪表盘表单项一一对应） |
 | `PUT /settings/escalation` | 保存全局收件至数据库（`default_owner_email` / `default_owner_name`；空字符串表示清除该字段覆盖并回退 .env） |
 | `GET /products` | 产品列表（含 owner 字段） |
@@ -206,13 +213,20 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `POST /products` | 新增/更新产品（唯一 owner 维护入口） |
 | `DELETE /products/{id}` | 删除产品 |
 | `GET /intents` | 情绪识别结果列表（含 cs_sentiment / cs_tone / escalated） |
-| `DELETE /intents` | 清空情绪识别记录 |
+| `DELETE /intents/{intent_id}` | 删除单条情绪识别记录 |
+| `DELETE /intents` | 清空全部情绪识别记录 |
 | `GET /escalations` | 内部通知（escalation）记录列表 |
+| `DELETE /escalations/{escalation_id}` | 删除单条内部通知留痕 |
+| `DELETE /escalations` | 清空全部内部通知留痕 |
 | `GET /kols` | 所有客户会话概览 |
 | `GET /thread/{thread_id}` | 单一会话完整对话历史 |
 | `DELETE /thread/{thread_id}` | 删除该会话数据 |
 | `DELETE /threads` | 清空全部会话数据 |
-| `GET /logs?tail=200` | 最近运行日志（`tail` 为条数上限，默认由前端传 200） |
+| `GET /processed` | 已处理邮件去重记录列表（调试/运维） |
+| `GET /logs?tail=200` | 最近运行日志（`tail` 为条数上限，内存环形缓冲） |
+| `DELETE /logs` | 清空当前进程内存中的运行日志缓冲区 |
+| `DELETE /products` | 删除全部产品（慎用） |
+| `DELETE /all-data` | 清空全部业务相关数据（慎用） |
 | `GET /emails` | 预览当前未读邮件（不触发处理） |
 
 ---
@@ -223,24 +237,34 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 |---|---|---|
 | `EMAIL_ADDRESS` | — | 阿里企业邮箱地址 |
 | `EMAIL_PASSWORD` | — | 邮箱密码 |
+| `SENDER_DISPLAY_NAME` | Support Team | 对外 `From` 显示名 |
+| `MAIL_REPLY_SUBJECT_WEB_STYLE` | true | `true` 时回复主题为阿里网页风「回复：…」，`false` 时为 `Re:` 风格 |
+| `IMAP_HOST` / `IMAP_PORT` | imap.qiye.aliyun.com / 993 | 一般保持默认即可 |
+| `SMTP_HOST` / `SMTP_PORT` | smtp.qiye.aliyun.com / 465 | 同上 |
 | `LLM_API_KEY` | — | LLM 服务 API Key |
-| `LLM_BASE_URL` | 通义千问 | LLM 接入地址（OpenAI Chat Completions 格式） |
-| `LLM_MODEL` | qwen-plus | 模型名称 |
+| `LLM_BASE_URL` | `https://openrouter.ai/api/v1` | Chat Completions 兼容地址（OpenRouter / OpenAI / 其它兼容网关） |
+| `LLM_MODEL` | `google/gemini-3.1-pro-preview` | OpenRouter **模型 slug**（如 `qwen/qwen3.6-plus`，勿使用路由上不存在的名称） |
+| `LLM_TIMEOUT` | 60 | LLM 请求超时（秒） |
 | `BRAND_NAME` | Our Brand | 品牌名（注入 LLM prompt） |
 | `BRAND_SIGNATURE` | Support Team | 邮件署名 |
+| `HOST` / `PORT` | 0.0.0.0 / 8000 | HTTP 服务监听地址与端口 |
 | `DEFAULT_SUPPORT_OWNER_EMAIL` | — | **最后一级兜底**：产品无负责人或未匹配到产品时的升级通知收件人 |
 | `DEFAULT_SUPPORT_OWNER_NAME` | Support Owner | 全局默认负责人姓名 |
 | `AUTO_REPLY_ON_ESCALATION` | true | **预留**，当前未接入业务逻辑；对外话术由安抚流 `after_sales_notified` 与提示词控制 |
 | `ALLOW_COMPENSATION_PROMISES` | false | 是否允许 LLM 在回复中承诺具体赔偿 |
 | `REPEAT_DISSATISFACTION_HOURS` | 24 | 判断「二次不满意强制升级」的时间窗（小时） |
 | `ESCALATION_EMAIL_COOLDOWN_MINUTES` | 60 | 同线程升级邮件冷却时间（分钟） |
+| `CALM_BYPASS_ESCALATION_COOLDOWN` | true | 不满/安抚类首次对外声称「已联系售后」等场景是否忽略冷却，保证内部通知必达 |
+| `CALM_EMPATHY_ONLY_MIN_PRIOR_OUTBOUND` | 3 | **安抚模式 empathy_pure 触发阈值**：本条回信**之前**线程里我方已回信条数 ≥ 该值（且走安抚路径）时，对客户**不再重复**售后/时间线套话，以短共情为主；夹在 **1～32** |
 | `DB_FILE` | kol_agent.db | SQLite 路径；**相对路径相对项目根目录**解析，与从哪个目录启动进程无关 |
 | `PRODUCTS_PATH` | data/products.json | 同上，相对项目根 |
 | `SUPPORT_STAFF_PATH` | data/support_staff.json | 同上，相对项目根 |
 | `MAX_THREAD_MESSAGES` | 10 | 每线程送 LLM 的最大历史条数 |
 | `BODY_EXCERPT_LENGTH` | 600 | 邮件正文入库截断字符数 |
-| `POLL_INTERVAL` | 120 | 轮询间隔（秒） |
-| `MAX_EMAILS_PER_CYCLE` | 20 | 每轮最多处理邮件数 |
+| `POLL_INTERVAL` | 120 | **轮询间隔（秒）**。每跑完一整轮检查后休眠该时长再起下一轮：**新来信的理论最大等待时间约等于本轮间隔 + 当周期间隔内尚未开始轮询的排队时间**（另受单轮耗时、来信量影响）。可调小（如 **60**）以加快响应；过小会增加 IMAP/LLM 压力。建议区间见 `.env.example`（常见 60–300）。 |
+| `AUTO_START_POLLING` | true | **进程启动后是否默认开启后台轮询**（`false` 时需手动 `POST /start-auto`） |
+| `MAX_EMAILS_PER_CYCLE` | 20 | 每个邮箱在每轮最多拉取 / 处理的未读邮件上限 |
+| `MAILBOX_FETCH_MAX_WORKERS` | 8 | **并行连接 IMAP 拉取邮箱数的上限**（实际为 `min(该值, 已启用邮箱数)`；**1** 表示完全顺序拉取）。夹在 **1～64**。多收件箱时可适当调大以缩短单轮拉信阶段耗时；过大可能触发邮服或网络侧并发连接限制。 |
 
 ---
 
@@ -263,10 +287,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## 注意事项
 
+- **SMTP/MIME**：`mail_service.py` 中对外回复使用与阿里云邮箱网页投递相近的多部分结构与会话头（`In-Reply-To` / `References` 等），便于与手工网页回信保持一致、降低误判风险；域名 SPF/DKIM 等仍以邮箱服务商与 DNS 配置为准。
 - **配置容错**：`PORT`、各超时/轮询/截断等数字型环境变量若填写非数字，将自动回退为内置默认值，避免进程无法启动。
 - **纯被动入站**：系统只响应收到的来信，不发送任何主动外呼邮件。
 - **外呼代码路径不可达**：`outbound_graph.py`、`campaign_service.py`、`send_outreach_email` 均已从代码库删除。
 - **多轮历史与线程绑定**：历史绝不跨线程混用，最多保留最近 `MAX_THREAD_MESSAGES` 条送 LLM。
 - **我方回复可信来源**：仅在 SMTP 发送成功后才写入 `thread_messages(role=our)`。
+- **轮询与手动检查互斥**：后台轮询与 `POST /check` **共用一把锁**；同一时间只会执行一处 `run_check_cycle`，避免出现双份处理。**尽快响应**：在可接受的资源占用下可把 `POLL_INTERVAL` 调小；极短延迟需邮服侧 **IMAP IDLE / 推送** 等机制，本项目为轮询模式。
 - **重复处理保护**：`processed_messages` 表保证同一封邮件不会被处理两次。
 - **数据库兼容**：`campaigns`、`outreach_messages`、`tickets` 表仍存在（兼容历史数据），但不再写入新数据。

@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
+from app.thread_scope import scope_message_stub, scope_thread_id
 from app.config import config
 from app.database import (
     count_escalation_events_for_thread,
@@ -34,6 +37,8 @@ from app.database import (
     save_thread_message,
     upsert_creator,
     upsert_thread_state,
+    list_enabled_mailboxes,
+    update_mailbox_check_status,
 )
 from app.escalation_settings import effective_default_owner
 from app.graphs import run_inbound_graph
@@ -50,6 +55,16 @@ logger = logging.getLogger(__name__)
 def _thread_has_prior_our_message(thread_history: list[dict]) -> bool:
     """本线程中是否已有我方（客服）发出过的历史。"""
     return any(m.get("is_mine") for m in (thread_history or []))
+
+
+def _count_customer_messages(thread_history: list[dict]) -> int:
+    """客户（非我方）来信条数；当前处理来信已写入 thread_history 后计数。"""
+    return sum(1 for m in (thread_history or []) if not m.get("is_mine"))
+
+
+def _count_our_messages(thread_history: list[dict]) -> int:
+    """本线程我方已发出回信条数（与 save 后拉取的 thread_history 一致）。"""
+    return sum(1 for m in (thread_history or []) if m.get("is_mine"))
 
 
 def _has_order_reference(text: str) -> bool:
@@ -79,6 +94,9 @@ def _has_product_mention_in_text(text: str, product: dict | None) -> bool:
     if product:
         name = (product.get("name") or "").strip()
         if name and name in t:
+            return True
+        pb = (product.get("brand") or "").strip()
+        if pb and len(pb) >= 2 and pb in t:
             return True
         for kw in (product.get("keywords") or [])[:12]:
             ks = str(kw).strip()
@@ -121,14 +139,31 @@ def _calm_reply_mode(
 ) -> str:
     """
     initial_three: 本线程中我方将发出**第一封**正式客服回复
+    empathy_pure: 本方已回信 ≥ N 封后仍以安抚为主的场景：对外**不重复**售后时间线空话，短共情
     close_ack: 客户已补订单+品名、收尾致谢与致歉
+    soothe_focus: 客户来信≥3 封：少索要订单，侧重多角度安抚与承接
     default: 其它多轮安抚
     """
     if not _thread_has_prior_our_message(thread_history):
         return "initial_three"
+    if _count_our_messages(thread_history) >= config.CALM_EMPATHY_ONLY_MIN_PRIOR_OUTBOUND:
+        return "empathy_pure"
     if _looks_order_and_product_only_followup(thread_history, latest_message, product):
         return "close_ack"
+    if _count_customer_messages(thread_history) >= 3:
+        return "soothe_focus"
     return "default"
+
+
+def _product_display_for_mail(product: dict | None) -> str:
+    """邮件/摘要中的产品展示：品牌 · 名称（若有品牌）。"""
+    if not product:
+        return "未绑定产品"
+    name = (product.get("name") or "").strip()
+    brand = (product.get("brand") or "").strip()
+    if brand and name:
+        return f"{brand} · {name}"
+    return name or "未绑定产品"
 
 
 def _thread_key(msg: dict) -> str:
@@ -243,9 +278,12 @@ def _can_send_escalation_now(thread_id: str, *, for_calm_path: bool) -> bool:
     return _cooldown_ok(thread_id)
 
 
-def _handle_one_email(msg: dict) -> dict:
-    thread_id = _thread_key(msg)
-    message_id = msg["message_id"] or msg["uid"]
+def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
+    mailbox_id = int(mailbox_row["id"])
+    raw_key = _thread_key(msg)
+    thread_id = scope_thread_id(mailbox_id, raw_key)
+    dedup_raw = msg["message_id"] or msg["uid"]
+    message_id = scope_message_stub(mailbox_id, dedup_raw)
     logger.info("─" * 50)
     logger.info(f"📩 收到来信: {msg['from_name']} <{msg['from_email']}>")
     logger.info(f"   主题: {msg['subject']}")
@@ -317,7 +355,7 @@ def _handle_one_email(msg: dict) -> dict:
         push_sequence = prior_count + 1
         contact_name = contact.get("name") or contact.get("email") or "未知联系人"
         contact_email = contact.get("email") or ""
-        product_name = (resolved_product or {}).get("name") or "未绑定产品"
+        product_name = _product_display_for_mail(resolved_product)
         priority = "high" if tone == "hostile" else "medium"
         # 为了让产品负责人看到完整的上下文（尤其是第二封信补齐信息的场景），将历史拼接
         history_lines = []
@@ -343,6 +381,7 @@ def _handle_one_email(msg: dict) -> dict:
 
         sent_at = datetime.now().isoformat()
         success = send_internal_escalation(
+            mailbox_row=mailbox_row,
             to_email=owner_email,
             to_name=owner_name,
             thread_id=thread_id,
@@ -406,7 +445,9 @@ def _handle_one_email(msg: dict) -> dict:
         
         calm_mode = _calm_reply_mode(thread_history, msg["body"], resolved_product)
         logger.info(
-            f"   安抚回复模式: {calm_mode} (首封索三项=initial_three / 单号+品名收尾=close_ack / 其他=default)"
+            f"   安抚回复模式: {calm_mode} (首封索三项=initial_three / "
+            f"多轮后不重复售后话术=empathy_pure / 收尾=close_ack / "
+            f"≥3封侧重安抚=soothe_focus / 其他=default)"
         )
         suggested_reply = generate_calm_reply(
             contact=contact,
@@ -428,11 +469,11 @@ def _handle_one_email(msg: dict) -> dict:
 
     # ── 发送用户回复 ────────────────────────────────────────────────────────────
     if suggested_reply:
-        sent_ok = send_reply(original=msg, reply_body=suggested_reply)
+        sent_ok = send_reply(mailbox_row, original=msg, reply_body=suggested_reply)
         if sent_ok:
             save_thread_message(
                 thread_id=thread_id,
-                message_id=f"our-reply-to-{message_id}",
+                message_id=scope_message_stub(mailbox_id, f"our-reply-to-{dedup_raw}"),
                 role="our",
                 subject=f"Re: {msg['subject']}",
                 body=suggested_reply[:config.BODY_EXCERPT_LENGTH],
@@ -482,12 +523,25 @@ def _handle_one_email(msg: dict) -> dict:
     }
 
 
+def _imap_fetch_for_mailbox(
+    mailbox_row: dict,
+) -> tuple[int, dict, list[dict], str | None]:
+    """单邮箱 IMAP 拉取；供线程池调用。返回 (id, row, emails, fetch_error)。"""
+    mid = int(mailbox_row["id"])
+    try:
+        emails = fetch_unread_emails(mailbox_row, limit=config.MAX_EMAILS_PER_CYCLE)
+        return mid, mailbox_row, emails, None
+    except Exception as exc:
+        logger.error("邮箱 %s IMAP 失败: %s", mid, exc, exc_info=True)
+        return mid, mailbox_row, [], str(exc)
+
+
 def run_check_cycle() -> dict:
     logger.info("=" * 50)
     logger.info("🔄 开始新一轮来信检查")
-    emails = fetch_unread_emails(limit=config.MAX_EMAILS_PER_CYCLE)
-    if not emails:
-        logger.info("😴 暂无未读邮件")
+    mailboxes = list_enabled_mailboxes()
+    if not mailboxes:
+        logger.warning("无已启用邮箱，跳过")
         return {
             "total": 0,
             "processed": 0,
@@ -496,49 +550,77 @@ def run_check_cycle() -> dict:
             "dissatisfied": 0,
             "satisfied": 0,
             "neutral": 0,
+            "mailbox_count": 0,
         }
 
+    t_cycle0 = time.perf_counter()
+    n_mb = len(mailboxes)
+    workers = max(1, min(config.MAILBOX_FETCH_MAX_WORKERS, n_mb))
+    if workers == 1:
+        snapshots = [_imap_fetch_for_mailbox(mb) for mb in mailboxes]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            snapshots = list(ex.map(_imap_fetch_for_mailbox, mailboxes))
+    t_after_imap = time.perf_counter()
+
     processed = success = escalated = 0
+    total_in = 0
     sentiment_counters: dict[str, int] = {"satisfied": 0, "neutral": 0, "dissatisfied": 0}
 
-    for msg in emails:
-        dedup_key = msg["message_id"] or msg["uid"]
-        thread_id = _thread_key(msg)
-
-        if is_message_processed(dedup_key):
+    for mid, mailbox_row, emails, fetch_err in snapshots:
+        if fetch_err:
+            update_mailbox_check_status(mid, last_error=fetch_err)
             continue
+        chk = datetime.now().isoformat()
+        update_mailbox_check_status(mid, last_error=None, last_checked_at=chk)
+        total_in += len(emails)
+        for msg in emails:
+            msg["mailbox_id"] = mid
+            raw_dedup = msg["message_id"] or msg["uid"]
+            thread_scoped = scope_thread_id(mid, _thread_key(msg))
+            scoped_mid = scope_message_stub(mid, raw_dedup)
+            if is_message_processed(scoped_mid, mid):
+                continue
+            mb_addr = (mailbox_row.get("email_address") or "").strip().lower()
+            if msg["from_email"].strip().lower() == mb_addr:
+                mark_message_processed(scoped_mid, thread_scoped, mid)
+                continue
+            processed += 1
+            try:
+                result = _handle_one_email(msg, mailbox_row)
+                k = result.get("sentiment", "neutral")
+                sentiment_counters[k] = sentiment_counters.get(k, 0) + 1
+                if result.get("escalated"):
+                    escalated += 1
+                success += 1
+            except Exception as exc:
+                logger.error(f"❌ 来信处理失败: {exc}", exc_info=True)
+            finally:
+                mark_message_processed(scoped_mid, thread_scoped, mid)
 
-        if msg["from_email"].lower() == config.EMAIL_ADDRESS.lower():
-            mark_message_processed(dedup_key, thread_id)
-            continue
-
-        processed += 1
-        try:
-            result = _handle_one_email(msg)
-            sentiment_counters[result.get("sentiment", "neutral")] = (
-                sentiment_counters.get(result.get("sentiment", "neutral"), 0) + 1
-            )
-            if result.get("escalated"):
-                escalated += 1
-            success += 1
-        except Exception as exc:
-            logger.error(f"❌ 来信处理失败: {exc}", exc_info=True)
-        finally:
-            mark_message_processed(dedup_key, thread_id)
-
+    elapsed = time.perf_counter() - t_cycle0
+    imap_phase_s = t_after_imap - t_cycle0
     logger.info(
-        "🎉 本轮完成: 处理 %s 封 | 升级=%s | satisfied=%s neutral=%s dissatisfied=%s",
+        "🎉 本轮完成: 拉取 %s 封 | 处理 %s | 升级=%s | satisfied=%s neutral=%s dissatisfied=%s",
+        total_in,
         processed,
         escalated,
         sentiment_counters["satisfied"],
         sentiment_counters["neutral"],
         sentiment_counters["dissatisfied"],
     )
+    logger.info(
+        "⏱ 本轮耗时 %.2fs（IMAP 并行 worker=%s，拉取阶段约 %.2fs）",
+        elapsed,
+        workers,
+        imap_phase_s,
+    )
     logger.info("=" * 50)
     return {
-        "total": len(emails),
+        "total": total_in,
         "processed": processed,
         "success": success,
         "escalated": escalated,
         **sentiment_counters,
+        "mailbox_count": len(mailboxes),
     }
