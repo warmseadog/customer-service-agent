@@ -104,6 +104,10 @@ async def lifespan(app: FastAPI):
     mbs = list_mailboxes()
     logger.info(f"   已配置邮箱账户数: {len(mbs)}")
     logger.info(f"   LLM:  {config.LLM_MODEL} @ {config.LLM_BASE_URL}")
+    if not (config.LLM_API_KEY or "").strip():
+        logger.error(
+            "   LLM_API_KEY 为空：所有大模型调用将失败。请检查 .env 是否已保存到磁盘，并重启本进程。"
+        )
     _esc = settings_api_dict()
     logger.info(
         f"   全局兜底收件人(生效): {_esc['effective_default_email'] or '（未配置）'}"

@@ -80,9 +80,15 @@ def call_llm(
     使用 OpenRouter 时可在 .env 中设置 LLM_HTTP_REFERER、LLM_APP_TITLE（对应 HTTP-Referer /
     X-OpenRouter-Title，可选自愿头）。
     """
+    api_key = (config.LLM_API_KEY or "").strip()
+    if not api_key:
+        raise ValueError(
+            "LLM_API_KEY 为空：请在项目根目录 .env 中设置 LLM_API_KEY=sk-or-v1-…，保存后重启进程。"
+            "（仅改编辑器未保存到磁盘时，运行中的 python 读不到密钥，OpenRouter 会报 401 Missing Authentication。）"
+        )
     url = f"{config.LLM_BASE_URL.rstrip('/')}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {config.LLM_API_KEY}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     ref = (config.LLM_HTTP_REFERER or "").strip()

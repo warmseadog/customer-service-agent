@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -279,6 +280,7 @@ def _can_send_escalation_now(thread_id: str, *, for_calm_path: bool) -> bool:
 
 
 def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
+    t0 = time.perf_counter()
     mailbox_id = int(mailbox_row["id"])
     raw_key = _thread_key(msg)
     thread_id = scope_thread_id(mailbox_id, raw_key)
@@ -302,6 +304,7 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
     )
 
     thread_history = _build_thread_history(thread_id)
+    t_after_prep = time.perf_counter()
 
     graph_result = run_inbound_graph(
         contact=contact,
@@ -311,6 +314,9 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
         latest_message=msg["body"],
         thread_history=thread_history,
     )
+    t_after_graph = time.perf_counter()
+    sec_prep = t_after_prep - t0
+    sec_graph = t_after_graph - t_after_prep
 
     # 图内关键词绑定的产品（若原来为 None，图内可能已匹配到）
     resolved_product = graph_result.get("product") or product
@@ -334,80 +340,87 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
     )
     escalated_flag = False
     after_sales_notified = False
+    sec_internal = 0.0
+    sec_calm = 0.0
 
     def _do_send_internal(reason: str, for_calm: bool) -> bool:
-        if not owner_email:
-            logger.warning("⚠️ 升级无收件人：产品未绑定 owner，DEFAULT_SUPPORT_OWNER_EMAIL 亦为空")
-            return False
-        # 避免将「客服工单」误发到客户邮箱（产品负责人 / 默认邮箱若误填为 KOL 邮箱）
-        _owner_l = owner_email.strip().lower()
-        _from_l = (msg.get("from_email") or "").strip().lower()
-        _contact_l = (contact.get("email") or "").strip().lower()
-        if _owner_l and (_owner_l == _from_l or (_contact_l and _owner_l == _contact_l)):
-            logger.error(
-                "⚠️ 内部升级收件人与客户邮箱相同，已跳过发送工单，请检查产品 owner / DEFAULT_SUPPORT_OWNER_EMAIL 配置"
-            )
-            return False
-        if not _can_send_escalation_now(thread_id, for_calm_path=for_calm):
-            logger.info(f"⏳ 升级冷却中，跳过内部通知（cooldown={config.ESCALATION_EMAIL_COOLDOWN_MINUTES}min）")
-            return False
-        # 同线程已成功写入的升级条数；本封即将发送的为第 (prior+1) 次推送
-        prior_count = count_escalation_events_for_thread(thread_id)
-        push_sequence = prior_count + 1
-        contact_name = contact.get("name") or contact.get("email") or "未知联系人"
-        contact_email = contact.get("email") or ""
-        product_name = _product_display_for_mail(resolved_product)
-        priority = "high" if tone == "hostile" else "medium"
-        # 为了让产品负责人看到完整的上下文（尤其是第二封信补齐信息的场景），将历史拼接
-        history_lines = []
-        for item in thread_history[-3:]:
-            role = "客服" if item.get("is_mine") else (contact.get("name") or "客户")
-            history_lines.append(f"[{role}] {item.get('body', '')[:300]}")
-        history_lines.append(f"[{contact.get('name') or '客户'}] {msg.get('body', '')[:1000]}")
-        orig_for_escalation = "\n\n".join(history_lines)[:2000]
-        
-        original_message_zh = translate_to_chinese_for_support(orig_for_escalation)
+        nonlocal sec_internal
+        _t_int0 = time.perf_counter()
+        try:
+            if not owner_email:
+                logger.warning("⚠️ 升级无收件人：产品未绑定 owner，DEFAULT_SUPPORT_OWNER_EMAIL 亦为空")
+                return False
+            # 避免将「客服工单」误发到客户邮箱（产品负责人 / 默认邮箱若误填为 KOL 邮箱）
+            _owner_l = owner_email.strip().lower()
+            _from_l = (msg.get("from_email") or "").strip().lower()
+            _contact_l = (contact.get("email") or "").strip().lower()
+            if _owner_l and (_owner_l == _from_l or (_contact_l and _owner_l == _contact_l)):
+                logger.error(
+                    "⚠️ 内部升级收件人与客户邮箱相同，已跳过发送工单，请检查产品 owner / DEFAULT_SUPPORT_OWNER_EMAIL 配置"
+                )
+                return False
+            if not _can_send_escalation_now(thread_id, for_calm_path=for_calm):
+                logger.info(f"⏳ 升级冷却中，跳过内部通知（cooldown={config.ESCALATION_EMAIL_COOLDOWN_MINUTES}min）")
+                return False
+            # 同线程已成功写入的升级条数；本封即将发送的为第 (prior+1) 次推送
+            prior_count = count_escalation_events_for_thread(thread_id)
+            push_sequence = prior_count + 1
+            contact_name = contact.get("name") or contact.get("email") or "未知联系人"
+            contact_email = contact.get("email") or ""
+            product_name = _product_display_for_mail(resolved_product)
+            priority = "high" if tone == "hostile" else "medium"
+            # 为了让产品负责人看到完整的上下文（尤其是第二封信补齐信息的场景），将历史拼接
+            history_lines = []
+            for item in thread_history[-3:]:
+                role = "客服" if item.get("is_mine") else (contact.get("name") or "客户")
+                history_lines.append(f"[{role}] {item.get('body', '')[:300]}")
+            history_lines.append(f"[{contact.get('name') or '客户'}] {msg.get('body', '')[:1000]}")
+            orig_for_escalation = "\n\n".join(history_lines)[:2000]
 
-        summary = escalation_summary
-        if not summary:
-            summary = generate_escalation_summary(
+            original_message_zh = translate_to_chinese_for_support(orig_for_escalation)
+
+            summary = escalation_summary
+            if not summary:
+                summary = generate_escalation_summary(
+                    thread_id=thread_id,
+                    contact=contact,
+                    product=resolved_product,
+                    latest_message=orig_for_escalation,
+                    sentiment=sentiment,
+                    tone=tone,
+                    reason=reason,
+                )
+
+            sent_at = datetime.now().isoformat()
+            success = send_internal_escalation(
+                mailbox_row=mailbox_row,
+                to_email=owner_email,
+                to_name=owner_name,
                 thread_id=thread_id,
-                contact=contact,
-                product=resolved_product,
-                latest_message=orig_for_escalation,
-                sentiment=sentiment,
-                tone=tone,
-                reason=reason,
+                contact_name=contact_name,
+                contact_email=contact_email,
+                product_name=product_name,
+                priority=priority,
+                escalation_summary=summary,
+                original_message=orig_for_escalation,
+                original_message_zh=original_message_zh,
+                push_sequence=push_sequence,
             )
-
-        sent_at = datetime.now().isoformat()
-        success = send_internal_escalation(
-            mailbox_row=mailbox_row,
-            to_email=owner_email,
-            to_name=owner_name,
-            thread_id=thread_id,
-            contact_name=contact_name,
-            contact_email=contact_email,
-            product_name=product_name,
-            priority=priority,
-            escalation_summary=summary,
-            original_message=orig_for_escalation,
-            original_message_zh=original_message_zh,
-            push_sequence=push_sequence,
-        )
-        if success:
-            create_escalation_event(
-                {
-                    "thread_id": thread_id,
-                    "creator_id": contact.get("id"),
-                    "product_id": (resolved_product or {}).get("id"),
-                    "reason": reason,
-                    "internal_email_to": owner_email,
-                    "sent_at": sent_at,
-                }
-            )
-            logger.info(f"🚨 已发送升级通知 → {owner_email}")
-        return success
+            if success:
+                create_escalation_event(
+                    {
+                        "thread_id": thread_id,
+                        "creator_id": contact.get("id"),
+                        "product_id": (resolved_product or {}).get("id"),
+                        "reason": reason,
+                        "internal_email_to": owner_email,
+                        "sent_at": sent_at,
+                    }
+                )
+                logger.info(f"🚨 已发送升级通知 → {owner_email}")
+            return success
+        finally:
+            sec_internal += time.perf_counter() - _t_int0
 
     # ── 决定是否立即发内部通知（基于严重度与状态机） ──
     is_red_alert = calm_intense or should_escalate
@@ -450,6 +463,7 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
             f"多轮后不重复售后话术=empathy_pure / 收尾=close_ack / "
             f"≥3封侧重安抚=soothe_focus / 其他=default)"
         )
+        t_calm0 = time.perf_counter()
         suggested_reply = generate_calm_reply(
             contact=contact,
             product=resolved_product,
@@ -462,6 +476,7 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
             intense_appeasement=calm_intense,
             calm_mode=calm_mode,
         )
+        sec_calm = time.perf_counter() - t_calm0
     elif should_escalate:
         # 非安抚但需升级（如仅关键词命中）
         if should_send_internal_now and owner_email:
@@ -469,7 +484,9 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
                 escalated_flag = True
 
     # ── 发送用户回复 ────────────────────────────────────────────────────────────
+    sec_outbound = 0.0
     if suggested_reply:
+        t_out0 = time.perf_counter()
         sent_ok = send_reply(mailbox_row, original=msg, reply_body=suggested_reply)
         if sent_ok:
             save_thread_message(
@@ -483,8 +500,10 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
             logger.info("✅ 已发送客服回复")
         else:
             logger.error("❌ 客服回复发送失败")
+        sec_outbound = time.perf_counter() - t_out0
 
     # ── 记录意图结果 ─────────────────────────────────────────────────────────────
+    t_persist0 = time.perf_counter()
     create_intent_result(
         {
             "thread_id": thread_id,
@@ -513,6 +532,21 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
         intent_label=f"{sentiment}/{tone}",
     )
 
+    sec_persist = time.perf_counter() - t_persist0
+    sec_total = time.perf_counter() - t0
+    sec_accounted = sec_prep + sec_graph + sec_internal + sec_calm + sec_outbound + sec_persist
+    sec_other = max(0.0, sec_total - sec_accounted)
+    logger.info(
+        "⏱ 本封耗时 合计%.2fs | 准备+入库来信%.2fs | 入站分析图%.2fs | 内部升级%.2fs | 安抚/兜底正文%.2fs | 回复客户%.2fs | 意图落库%.2fs | 其它%.2fs",
+        sec_total,
+        sec_prep,
+        sec_graph,
+        sec_internal,
+        sec_calm,
+        sec_outbound,
+        sec_persist,
+        sec_other,
+    )
     logger.info(f"🎯 处理完成 | sentiment={sentiment} tone={tone} escalated={escalated_flag}")
     return {
         "sentiment": sentiment,
@@ -521,6 +555,49 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
         "contact_email": contact.get("email"),
         "contact_name": contact.get("name"),
         "thread_id": thread_id,
+    }
+
+
+def _msg_sort_key(msg: dict) -> tuple[str, int]:
+    """同 thread 内多封未读时的稳定顺序：日期字符串升序，其次 IMAP uid。"""
+    uid_raw = str(msg.get("uid") or "")
+    try:
+        uid_i = int(uid_raw)
+    except ValueError:
+        uid_i = 0
+    return (str(msg.get("date") or ""), uid_i)
+
+
+def _process_thread_batch(tasks: list[dict]) -> dict:
+    """
+    同一 thread_scoped 内顺序处理多封来信；供线程池调用。
+    每项含 msg, mailbox_row, scoped_mid, thread_scoped, mid。
+    """
+    sentiment_counters: dict[str, int] = {"satisfied": 0, "neutral": 0, "dissatisfied": 0}
+    processed = success = escalated = 0
+    for t in tasks:
+        msg = t["msg"]
+        mailbox_row = t["mailbox_row"]
+        scoped_mid = t["scoped_mid"]
+        thread_scoped = t["thread_scoped"]
+        mid = t["mid"]
+        processed += 1
+        try:
+            result = _handle_one_email(msg, mailbox_row)
+            k = result.get("sentiment", "neutral")
+            sentiment_counters[k] = sentiment_counters.get(k, 0) + 1
+            if result.get("escalated"):
+                escalated += 1
+            success += 1
+        except Exception as exc:
+            logger.error(f"❌ 来信处理失败: {exc}", exc_info=True)
+        finally:
+            mark_message_processed(scoped_mid, thread_scoped, mid)
+    return {
+        "processed": processed,
+        "success": success,
+        "escalated": escalated,
+        "sentiment_counters": sentiment_counters,
     }
 
 
@@ -567,6 +644,7 @@ def run_check_cycle() -> dict:
     processed = success = escalated = 0
     total_in = 0
     sentiment_counters: dict[str, int] = {"satisfied": 0, "neutral": 0, "dissatisfied": 0}
+    tasks_by_thread: defaultdict[str, list[dict]] = defaultdict(list)
 
     for mid, mailbox_row, emails, fetch_err in snapshots:
         if fetch_err:
@@ -586,21 +664,51 @@ def run_check_cycle() -> dict:
             if msg["from_email"].strip().lower() == mb_addr:
                 mark_message_processed(scoped_mid, thread_scoped, mid)
                 continue
-            processed += 1
-            try:
-                result = _handle_one_email(msg, mailbox_row)
-                k = result.get("sentiment", "neutral")
-                sentiment_counters[k] = sentiment_counters.get(k, 0) + 1
-                if result.get("escalated"):
-                    escalated += 1
-                success += 1
-            except Exception as exc:
-                logger.error(f"❌ 来信处理失败: {exc}", exc_info=True)
-            finally:
-                mark_message_processed(scoped_mid, thread_scoped, mid)
+            tasks_by_thread[thread_scoped].append(
+                {
+                    "msg": msg,
+                    "mailbox_row": mailbox_row,
+                    "scoped_mid": scoped_mid,
+                    "thread_scoped": thread_scoped,
+                    "mid": mid,
+                }
+            )
+
+    batches = []
+    for _tid, tlist in tasks_by_thread.items():
+        tlist.sort(key=lambda x: _msg_sort_key(x["msg"]))
+        batches.append(tlist)
+
+    t_after_queue = time.perf_counter()
+
+    proc_workers = max(1, config.EMAIL_PROCESS_MAX_WORKERS)
+    n_batches = len(batches)
+    effective_proc_workers = 1 if n_batches <= 1 else min(proc_workers, n_batches)
+    if n_batches == 0:
+        pass
+    elif effective_proc_workers == 1:
+        for batch in batches:
+            part = _process_thread_batch(batch)
+            processed += part["processed"]
+            success += part["success"]
+            escalated += part["escalated"]
+            for skey, sv in part["sentiment_counters"].items():
+                sentiment_counters[skey] = sentiment_counters.get(skey, 0) + sv
+    else:
+        with ThreadPoolExecutor(max_workers=effective_proc_workers) as ex:
+            for part in ex.map(_process_thread_batch, batches):
+                processed += part["processed"]
+                success += part["success"]
+                escalated += part["escalated"]
+                for skey, sv in part["sentiment_counters"].items():
+                    sentiment_counters[skey] = sentiment_counters.get(skey, 0) + sv
+
+    t_after_process = time.perf_counter()
 
     elapsed = time.perf_counter() - t_cycle0
-    imap_phase_s = t_after_imap - t_cycle0
+    sec_imap = t_after_imap - t_cycle0
+    sec_queue = t_after_queue - t_after_imap
+    sec_process = t_after_process - t_after_queue
     logger.info(
         "🎉 本轮完成: 拉取 %s 封 | 处理 %s | 升级=%s | satisfied=%s neutral=%s dissatisfied=%s",
         total_in,
@@ -611,10 +719,15 @@ def run_check_cycle() -> dict:
         sentiment_counters["dissatisfied"],
     )
     logger.info(
-        "⏱ 本轮耗时 %.2fs（IMAP 并行 worker=%s，拉取阶段约 %.2fs）",
+        "⏱ 本轮阶段耗时 合计%.2fs | IMAP拉取%.2fs | 分拣组批%.2fs | 处理来信%.2fs "
+        "（IMAP并行worker=%s，会话batch=%s，处理并行≤%s）",
         elapsed,
+        sec_imap,
+        sec_queue,
+        sec_process,
         workers,
-        imap_phase_s,
+        n_batches,
+        effective_proc_workers if n_batches else 0,
     )
     logger.info("=" * 50)
     return {

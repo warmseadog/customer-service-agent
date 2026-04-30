@@ -11,7 +11,10 @@ _env = dotenv_values(_env_path)
 
 
 def _get(key: str, default: str = "") -> str:
-    return _env.get(key) or default
+    raw = _env.get(key)
+    if raw is None:
+        return default
+    return str(raw).strip() or default
 
 
 def _int(key: str, default: int) -> int:
@@ -43,6 +46,7 @@ class Config:
 
     # LLM（默认 OpenRouter + Gemini；换供应商改 LLM_BASE_URL / LLM_MODEL）
     LLM_API_KEY: str = _get("LLM_API_KEY")
+    # 统一去掉尾随空格，避免 Bearer 后多出不可见字符导致网关报 Missing Authentication
     LLM_BASE_URL: str = _get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
     LLM_MODEL: str = _get("LLM_MODEL", "google/gemini-3.1-pro-preview")
     LLM_TIMEOUT: int = _int("LLM_TIMEOUT", 60)
@@ -104,6 +108,9 @@ class Config:
     # 每轮检查时并行连接 IMAP 的上限（1=顺序拉取）；多邮箱时拉大以缩短单轮耗时，过大可能触发邮服/NAT 限连
     _mw = _int("MAILBOX_FETCH_MAX_WORKERS", 8)
     MAILBOX_FETCH_MAX_WORKERS: int = max(1, min(64, _mw))
+    # 每轮「处理来信」时并行线程上限：按 thread_scoped 分组，组内顺序、组间并行；1=与旧版一致全串行
+    _epw = _int("EMAIL_PROCESS_MAX_WORKERS", 4)
+    EMAIL_PROCESS_MAX_WORKERS: int = max(1, min(16, _epw))
     # 本条回信之前线程内我方回信数 ≥ 该阈值时，安抚对外采用 empathy_pure（不重复售后时间线套话）；范围 1–32
     _emp = _int("CALM_EMPATHY_ONLY_MIN_PRIOR_OUTBOUND", 3)
     CALM_EMPATHY_ONLY_MIN_PRIOR_OUTBOUND: int = max(1, min(32, _emp))

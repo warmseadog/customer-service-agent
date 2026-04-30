@@ -29,6 +29,8 @@
    记录 escalation_events
 ```
 
+**性能与并发（简述）**：每轮先 **并行 IMAP** 拉取各邮箱未读，再按 **邮件会话**（含 `mailbox_id`，见 `thread_scope.py`）分组；**不同会话**可并行处理（`EMAIL_PROCESS_MAX_WORKERS`），**同一会话多封未读**仍顺序处理。日志中输出各阶段耗时，便于调优。
+
 ---
 
 ## 功能概览
@@ -45,7 +47,8 @@
 | **产品匹配** | 线程已绑定产品优先使用，否则用关键词匹配产品库兜底 |
 | **多轮对话记忆** | 按邮件线程（Thread）隔离存储完整收发历史，最多送 LLM N 条 |
 | **Web 仪表盘** | 客户会话、内部通知、客诉分析、产品库、**内部客服**（可分配负责人名单 + 备用/兜底收件人）、日志 |
-| **多邮箱收件** | 在仪表盘「邮箱账户」配置多台；每轮检查时 **IMAP 并行拉取**（详见 `MAILBOX_FETCH_MAX_WORKERS`），来信处理仍为顺序执行 |
+| **多邮箱收件** | 在仪表盘「邮箱账户」配置多台；每轮 **IMAP 并行拉取**（`MAILBOX_FETCH_MAX_WORKERS`）；**不同邮件会话**可并行处理（`EMAIL_PROCESS_MAX_WORKERS`），同一会话内多封未读仍顺序处理 |
+| **阶段耗时日志** | 每轮结束输出 **本轮阶段耗时**：IMAP 拉取 / 分拣组批 / 处理来信；每封来信结束输出 **本封耗时**：准备与入库来信、入站分析图、内部升级、安抚或兜底正文、回复客户 SMTP、意图落库及「其它」余项，便于定位瓶颈 |
 
 ---
 
@@ -75,8 +78,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 .
 ├── app/
-│   ├── agent.py              # 来信处理核心：收信→分析情绪→升级判断→发回复→写升级记录
-│   ├── config.py             # 环境变量统一读取（含客服配置项）
+│   ├── agent.py              # 来信处理核心：收信→分析情绪→升级判断→发回复→写升级记录（含分段耗时日志）
+│   ├── config.py             # 环境变量统一读取（含客服配置项；字符串 trim）
+│   ├── thread_scope.py       # 线程 ID 作用域：mailbox_id + RFC 线索，避免多收件箱键冲突
 │   ├── escalation_settings.py # 全局兜底收件人：DB 覆盖层 + effective 取值
 │   ├── database.py           # SQLite 持久化层
 │   ├── llm_service.py        # LLM 调用：情绪分析 + 回复生成 + 升级摘要
@@ -101,7 +105,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## 数据库表结构
 
-系统使用 SQLite，核心表包括（另含历史兼容表，见下行）：
+系统使用 SQLite，连接使用 **WAL** 与 **busy_timeout**（见 `database._get_conn`），便于多会话并行写入时降低锁等待。核心表包括（另含历史兼容表，见下行）：
 
 | 表名 | 职责 |
 |---|---|
@@ -110,7 +114,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `mailboxes` | 邮箱账户：IMAP/SMTP、对外品牌与发件人名；多账户轮询收信 |
 | `mailbox_products` | **产品与邮箱多对多**：仅当某产品关联到某邮箱时，该邮箱的来信关键词匹配才会命中该产品 |
 | `support_staff` | 内部可分配人员：姓名、邮箱；**仪表盘「内部客服」名单**与产品负责人下拉数据源 |
-| `kol_threads` | 邮件线程状态：情绪标签、最后处理消息、绑定产品 |
+| `kol_threads` | 邮件线程状态：情绪标签、最后处理消息、绑定产品；**thread_id 含邮箱作用域**（与 `thread_scope` 一致） |
 | `thread_messages` | 多轮对话历史：每封来信和我方回复 |
 | `intent_results` | 每封来信的情绪识别结果（cs_sentiment / cs_tone / escalated） |
 | `escalation_events` | 升级事件记录：通知发送至、升级原因、时间戳 |
@@ -204,9 +208,19 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | **邮箱账户** | 多台站点邮箱：分别填写 IMAP/SMTP；仪表盘含阿里云企业邮、Gmail、Outlook/Hotmail、Microsoft 365、Yahoo、网易 163 等一键模板。**「测试」**：依次验证 **IMAP**（登录并预览最多 1 封未读，可无未读）与 **SMTP**（与同账号真实发信相同的 TLS/登录流程，**仅 AUTH，不投递邮件**）。对外客服回复与内部升级通知共用该邮箱的 SMTP |
 | **运行日志** | 最近 200 条运行日志（接口 `GET /logs?tail=200`），每 6 秒自动刷新 |
 
-进程启动后默认**开启收件轮询**（环境变量 `AUTO_START_POLLING=true`）；仅在仪表盘点击「停止轮询」或结束进程后停止。设为 `false` 时需手动调用 `POST /start-auto`。启动定时轮询时会打印间隔秒数；每完成一轮检查，日志中会输出本轮耗时及 IMAP 并行 worker（对应 `MAILBOX_FETCH_MAX_WORKERS`，便于调优）。
+进程启动后默认**开启收件轮询**（环境变量 `AUTO_START_POLLING=true`）；仅在仪表盘点击「停止轮询」或结束进程后停止。设为 `false` 时需手动调用 `POST /start-auto`。详见上文 **[运行日志与耗时](#运行日志与耗时)**；若 `LLM_API_KEY` 为空，启动时会打错误级提示，且 `call_llm` 会抛出明确错误而非含糊 401。
 
 **说明**：已不再提供「来函客户」类手工客户表维护；`creators` 仅由收信流程按需写入，用于会话与升级展示关联。
+
+---
+
+## 运行日志与耗时
+
+- **内存环形缓冲**：`GET /logs?tail=N`、仪表盘「运行日志」展示最近若干条。
+- **每一轮检查**（`run_check_cycle`）：日志行 **⏱ 本轮阶段耗时** 拆分为 **合计**、**IMAP 拉取**、**分拣组批**（邮箱状态更新 + 按 `thread_scoped` 分组排序）、**处理来信**（并行上限见 `EMAIL_PROCESS_MAX_WORKERS`），并附带本轮 IMAP / 处理 worker 配置说明。
+- **每一封来信**：在 **⏱ 本封耗时** 中拆分为 **准备+入库来信**、**入站分析图**（LangGraph）、**内部升级**（进入升级通知路径时的译文/摘要/SMTP）、**安抚/兜底正文**（安抚路径的 `generate_calm_reply`，非安抚则为 0）、**回复客户**（对外 SMTP）、**意图落库**、**其它**（未计入前项的间隔，正常应接近 0）。
+
+并行处理时多线程日志可能交错，属于正常现象。
 
 ---
 
@@ -261,10 +275,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `MAIL_REPLY_SUBJECT_WEB_STYLE` | true | `true` 时回复主题为阿里网页风「回复：…」，`false` 时为 `Re:` 风格 |
 | `IMAP_HOST` / `IMAP_PORT` | imap.qiye.aliyun.com / 993 | 一般保持默认即可 |
 | `SMTP_HOST` / `SMTP_PORT` | smtp.qiye.aliyun.com / 465 | 同上 |
-| `LLM_API_KEY` | — | LLM 服务 API Key |
-| `LLM_BASE_URL` | `https://openrouter.ai/api/v1` | Chat Completions 兼容地址（OpenRouter / OpenAI / 其它兼容网关） |
+| `LLM_API_KEY` | — | LLM 服务 API Key（OpenRouter 多为 `sk-or-v1-…`）。**须写入已保存的项目根目录 `.env`**；仅在编辑器里填写未保存到磁盘时，进程读不到密钥，易出现 **401 / Missing Authentication**。 |
+| `LLM_BASE_URL` | `https://openrouter.ai/api/v1` | Chat Completions 兼容地址（OpenRouter / OpenAI / 其它兼容网关）；须与密钥所属服务商一致 |
 | `LLM_MODEL` | `google/gemini-3.1-pro-preview` | OpenRouter **模型 slug**（如 `qwen/qwen3.6-plus`，勿使用路由上不存在的名称） |
 | `LLM_TIMEOUT` | 60 | LLM 请求超时（秒） |
+| `LLM_HTTP_REFERER` / `LLM_APP_TITLE` | — | OpenRouter 可选自愿头；留空则不发送（见 `.env.example`） |
 | `BRAND_NAME` | Our Brand | 品牌名（注入 LLM prompt） |
 | `BRAND_SIGNATURE` | Support Team | 邮件署名 |
 | `HOST` / `PORT` | 0.0.0.0 / 8000 | HTTP 服务监听地址与端口 |
@@ -285,6 +300,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `AUTO_START_POLLING` | true | **进程启动后是否默认开启后台轮询**（`false` 时需手动 `POST /start-auto`） |
 | `MAX_EMAILS_PER_CYCLE` | 20 | 每个邮箱在每轮最多拉取 / 处理的未读邮件上限 |
 | `MAILBOX_FETCH_MAX_WORKERS` | 8 | **并行连接 IMAP 拉取邮箱数的上限**（实际为 `min(该值, 已启用邮箱数)`；**1** 表示完全顺序拉取）。夹在 **1～64**。多收件箱时可适当调大以缩短单轮拉信阶段耗时；过大可能触发邮服或网络侧并发连接限制。 |
+| `EMAIL_PROCESS_MAX_WORKERS` | 4 | **每轮处理来信时的并行线程上限**（夹在 **1～16**；**1** 表示处理阶段完全串行，与旧行为一致）。实际并发为 `min(该值, 本会话批次数)`：系统按 **邮件会话**（`thread_scoped`）分组，**同一会话内**多封未读仍**顺序**处理，**不同会话**可并行以缩短总墙钟时间。过大可能触发 OpenRouter 限流或 SQLite 锁等待。 |
 
 ---
 
@@ -307,8 +323,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ## 注意事项
 
+- **多邮箱与对话隔离**：`thread_scope` 将会话键与 **mailbox_id** 组合为 `thread_id`，**来信历史、LLM 上下文、升级记录按会话隔离**，不会在多站点邮箱之间混用同一线程。`creators` 表按客户 **邮箱全局唯一**：同人连系多站时联系人主档共用一条，**不等于**对话内容串台。
 - **SMTP/MIME**：`mail_service.py` 中对外回复使用与阿里云邮箱网页投递相近的多部分结构与会话头（`In-Reply-To` / `References` 等），便于与手工网页回信保持一致、降低误判风险；域名 SPF/DKIM 等仍以邮箱服务商与 DNS 配置为准。
 - **发信主机与收信主机分离**：例如阿里云企业邮 **IMAP** 为 `imap.qiye.aliyun.com`，**SMTP** 须填 **`smtp.qiye.aliyun.com`**（勿把 IMAP 主机填进 SMTP）。端口常见为 **465 + SMTP SSL**，或 **587 + 关闭 SSL 隐含连接**（`STARTTLS`，与仪表盘勾选一致）。填错易出现「测试/发信失败、收信仍正常」。
+- **SQLite 并行写**：数据库连接已启用 **WAL** 与 **busy_timeout**，多会话并行处理时可降低锁冲突。工作目录下可能出现 `-wal` / `-shm` 文件，属正常现象。
 - **Windows 与 TLS**：若 `SMTP_SSL` 握手报 `FileNotFoundError` 等证书路径错误，可检查环境变量 `SSL_CERT_FILE` / `SSL_CERT_DIR` 是否指向不存在路径；`imap_tools` 与 `smtplib` 的 TLS 路径不完全相同，可能出现仅 IMAP 通过、SMTP 失败。
 - **配置容错**：`PORT`、各超时/轮询/截断等数字型环境变量若填写非数字，将自动回退为内置默认值，避免进程无法启动。
 - **纯被动入站**：系统只响应收到的来信，不发送任何主动外呼邮件。

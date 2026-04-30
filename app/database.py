@@ -32,8 +32,16 @@ logger = logging.getLogger(__name__)
 
 def _get_conn() -> sqlite3.Connection:
     """创建并返回数据库连接，启用 Row 工厂便于字典访问"""
-    conn = sqlite3.connect(config.DB_FILE)
+    conn = sqlite3.connect(config.DB_FILE, timeout=10.0)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+    except sqlite3.Error:
+        pass
+    try:
+        conn.execute("PRAGMA busy_timeout=5000;")
+    except sqlite3.Error:
+        pass
     return conn
 
 
