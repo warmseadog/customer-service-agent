@@ -107,6 +107,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 |---|---|
 | `creators` | 联系人主档：邮箱、姓名等；**来信处理时会自动 upsert**，仪表盘不提供手工增删客户 |
 | `products` | 产品库：名称、**brand（品牌）**、**asin**、关键词、**负责人 owner_name / owner_email** |
+| `mailboxes` | 邮箱账户：IMAP/SMTP、对外品牌与发件人名；多账户轮询收信 |
+| `mailbox_products` | **产品与邮箱多对多**：仅当某产品关联到某邮箱时，该邮箱的来信关键词匹配才会命中该产品 |
 | `support_staff` | 内部可分配人员：姓名、邮箱；**仪表盘「内部客服」名单**与产品负责人下拉数据源 |
 | `kol_threads` | 邮件线程状态：情绪标签、最后处理消息、绑定产品 |
 | `thread_messages` | 多轮对话历史：每封来信和我方回复 |
@@ -148,6 +150,19 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 2. 通过仪表盘「产品库」Tab 的表单更新（`POST /products`）。负责人可从「**内部客服**」页维护的名单（`support_staff`）下拉选择，也可选「其他」手动填写内部邮箱
 3. 直接修改 SQLite 数据库中 `products` 表的 `owner_email` 字段
 
+**独立站邮箱 ↔ 产品（多对多）**：在「产品库」勾选「独立站邮箱」后保存，会写入 `mailbox_products`。系统对某封来信的**关键词自动绑品**只在「当前收件邮箱所关联的产品集合」内匹配，**不会**扫全库；未勾选任何邮箱的产品不参与任何邮箱的关键词匹配。请求体带 `mailbox_ids` 时会**覆盖**该产品的全部邮箱关联；不带该字段则**不改**现有关联（兼容旧客户端）。
+
+**产品库界面**：
+
+- **按邮箱看产品**：列表上方有「**全部产品** / **各邮箱**」**下划线切换**（选中状态存入浏览器 `sessionStorage`，刷新可保留）。点某一邮箱后，表格**只显示**已关联到该邮箱的产品（按站管理，来信关键词只在这些产品里匹配）；点「全部产品」时多一列 **「邮箱账户」** 摘要。
+- **放大镜 · 筛选邮箱标签**：邮箱标签行右侧有搜索按钮，展开后按 **名称 / 邮箱 / ID** 过滤**标签按钮**（「全部产品」与**当前已选邮箱**的标签不会被筛掉，避免找不到选中项）。
+- **放大镜 · 产品表单里的独立站邮箱**：勾选多选列表旁可展开搜索，按关键词**显示/隐藏**各行复选框，便于几十个邮箱时快速勾选。
+- **保存**：在某一邮箱视图下保存产品时，会自动把**当前视图邮箱**并入 `mailbox_ids`（与已勾选项合并去重）。
+
+**客户会话界面**：
+
+- **当前邮箱**下拉旁有 **放大镜**：展开后按关键词**筛选下拉中的邮箱选项**（「全部」保留；若当前选中项被筛掉，仍会出现在列表中以免丢失选择）。
+
 **内部名单**：在「内部客服」页添加/删除人员会调用 `POST /support-staff`、`DELETE /support-staff/{id}`，与产品表单中的负责人下拉实时一致。
 
 一般（非 hostile 的安抚类、及非安抚类升级）收件人优先级：`product.owner_email` → `product.fallback_owner_email` → **BACKUP** → **DEFAULT**。
@@ -181,12 +196,12 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 | 标签页 | 内容 |
 |---|---|
-| **客户会话** | 会话列表（客户、情绪标签、最后更新）+ 最近情绪识别预览（内部仍以邮件 `thread_id` 标识同一会话） |
+| **客户会话** | 会话列表 + 最近情绪预览。**当前邮箱**：下拉筛选本会话列表来自哪一台收件箱；旁侧 **放大镜** 可按关键词筛下拉选项（名称/邮箱/ID）。 |
 | **内部通知** | 已发给产品/备用的内部说明邮件留痕：客户、产品、事由、通知发送至 |
 | **客诉分析** | 每封来信的 sentiment / tone / 是否已转内部 |
-| **产品库** | 产品增删改，含 owner_name / owner_email 维护（1A） |
+| **产品库** | 产品增删改（1A）。**按邮箱下划线切换**仅看该站关联产品；**放大镜**可搜邮箱标签 / 搜表单里的多选邮箱。**在某一邮箱视图下保存**会自动带上该邮箱到 `mailbox_ids` |
 | **内部客服** | **同一页**包含：① **可分配负责人名单**（姓名、内部企业邮箱，对应 `support_staff`）；② **全局兜底收件人**（与 `GET/PUT /settings/escalation` 一致）。编辑区为 **一行两列**：「兜底 · 邮箱 | 兜底 · 称呼」，少占纵向空间 |
-| **邮箱账户** | 多台站点邮箱：分别填写 IMAP/SMTP；仪表盘含阿里云企业邮、Gmail、Outlook/Hotmail、Microsoft 365、Yahoo、网易 163 等一键模板 |
+| **邮箱账户** | 多台站点邮箱：分别填写 IMAP/SMTP；仪表盘含阿里云企业邮、Gmail、Outlook/Hotmail、Microsoft 365、Yahoo、网易 163 等一键模板。**「测试」**：依次验证 **IMAP**（登录并预览最多 1 封未读，可无未读）与 **SMTP**（与同账号真实发信相同的 TLS/登录流程，**仅 AUTH，不投递邮件**）。对外客服回复与内部升级通知共用该邮箱的 SMTP |
 | **运行日志** | 最近 200 条运行日志（接口 `GET /logs?tail=200`），每 6 秒自动刷新 |
 
 进程启动后默认**开启收件轮询**（环境变量 `AUTO_START_POLLING=true`）；仅在仪表盘点击「停止轮询」或结束进程后停止。设为 `false` 时需手动调用 `POST /start-auto`。启动定时轮询时会打印间隔秒数；每完成一轮检查，日志中会输出本轮耗时及 IMAP 并行 worker（对应 `MAILBOX_FETCH_MAX_WORKERS`，便于调优）。
@@ -206,11 +221,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `GET /status` | 服务状态（含 `auto_polling`、`auto_start_polling_default`、`poll_interval_seconds`、汇总数据等） |
 | `GET /settings/escalation` | 全局 DEFAULT：数据库覆盖值、生效值、.env 对照（body 与仪表盘表单项一一对应） |
 | `PUT /settings/escalation` | 保存全局收件至数据库（`default_owner_email` / `default_owner_name`；空字符串表示清除该字段覆盖并回退 .env） |
-| `GET /products` | 产品列表（含 owner 字段） |
+| `GET /products` | 产品列表（含 owner、**`mailbox_ids`** 等；与 `mailbox_products` 关联一致） |
 | `GET /support-staff` | 内部可分配人员列表（产品负责人下拉数据源） |
 | `POST /support-staff` | 添加人员（body: `display_name`, `email`） |
 | `DELETE /support-staff/{id}` | 删除人员记录 |
-| `POST /products` | 新增/更新产品（唯一 owner 维护入口） |
+| `POST /products` | 新增/更新产品（owner 维护入口）。可选 **`mailbox_ids`**（整数数组）：传入则**覆盖**该产品全部邮箱关联；不传则**不改动**现有关联 |
 | `DELETE /products/{id}` | 删除产品 |
 | `GET /intents` | 情绪识别结果列表（含 cs_sentiment / cs_tone / escalated） |
 | `DELETE /intents/{intent_id}` | 删除单条情绪识别记录 |
@@ -218,7 +233,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `GET /escalations` | 内部通知（escalation）记录列表 |
 | `DELETE /escalations/{escalation_id}` | 删除单条内部通知留痕 |
 | `DELETE /escalations` | 清空全部内部通知留痕 |
-| `GET /kols` | 所有客户会话概览 |
+| `GET /kols` | 客户会话概览；可选查询参数 **`mailbox_id`** 仅看该收件箱 |
 | `GET /thread/{thread_id}` | 单一会话完整对话历史 |
 | `DELETE /thread/{thread_id}` | 删除该会话数据 |
 | `DELETE /threads` | 清空全部会话数据 |
@@ -228,6 +243,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `DELETE /products` | 删除全部产品（慎用） |
 | `DELETE /all-data` | 清空全部业务相关数据（慎用） |
 | `GET /emails` | 预览当前未读邮件（不触发处理） |
+| `GET /mailboxes` | 邮箱账户列表 |
+| `POST /mailboxes` | 新增邮箱账户 |
+| `PUT /mailboxes/{mailbox_id}` | 更新邮箱账户 |
+| `DELETE /mailboxes/{mailbox_id}` | 删除邮箱账户 |
+| `POST /mailboxes/{mailbox_id}/test` | 连通性测试：**IMAP** + **SMTP 登录**（不发信）。响应含 `status`: `ok` / `partial` / `failed`，以及 `imap` / `smtp` 分项与兼容字段 `peek_count` |
 
 ---
 
@@ -288,6 +308,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ## 注意事项
 
 - **SMTP/MIME**：`mail_service.py` 中对外回复使用与阿里云邮箱网页投递相近的多部分结构与会话头（`In-Reply-To` / `References` 等），便于与手工网页回信保持一致、降低误判风险；域名 SPF/DKIM 等仍以邮箱服务商与 DNS 配置为准。
+- **发信主机与收信主机分离**：例如阿里云企业邮 **IMAP** 为 `imap.qiye.aliyun.com`，**SMTP** 须填 **`smtp.qiye.aliyun.com`**（勿把 IMAP 主机填进 SMTP）。端口常见为 **465 + SMTP SSL**，或 **587 + 关闭 SSL 隐含连接**（`STARTTLS`，与仪表盘勾选一致）。填错易出现「测试/发信失败、收信仍正常」。
+- **Windows 与 TLS**：若 `SMTP_SSL` 握手报 `FileNotFoundError` 等证书路径错误，可检查环境变量 `SSL_CERT_FILE` / `SSL_CERT_DIR` 是否指向不存在路径；`imap_tools` 与 `smtplib` 的 TLS 路径不完全相同，可能出现仅 IMAP 通过、SMTP 失败。
 - **配置容错**：`PORT`、各超时/轮询/截断等数字型环境变量若填写非数字，将自动回退为内置默认值，避免进程无法启动。
 - **纯被动入站**：系统只响应收到的来信，不发送任何主动外呼邮件。
 - **外呼代码路径不可达**：`outbound_graph.py`、`campaign_service.py`、`send_outreach_email` 均已从代码库删除。

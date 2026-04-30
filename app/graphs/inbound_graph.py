@@ -18,7 +18,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, StateGraph
 
 from app.config import config
-from app.database import check_repeat_dissatisfaction, list_products
+from app.database import check_repeat_dissatisfaction, list_products_for_mailbox
 from app.llm_service import (
     detect_customer_satisfaction_and_tone,
     generate_escalation_summary,
@@ -36,6 +36,7 @@ _FORCE_ESCALATION_KEYWORDS = [
 class InboundState(TypedDict, total=False):
     contact: dict
     product: dict | None
+    mailbox_id: int
     thread_id: str
     latest_message: str
     thread_history: list[dict]
@@ -53,7 +54,7 @@ class InboundState(TypedDict, total=False):
 
 
 def _bind_product(state: InboundState) -> InboundState:
-    """若 state 中 product 已绑定则直接用；否则通过关键词匹配 products 表。"""
+    """若 state 中 product 已绑定则直接用；否则仅在本邮箱关联产品集中做关键词匹配。"""
     if state.get("product"):
         return {}
 
@@ -64,7 +65,8 @@ def _bind_product(state: InboundState) -> InboundState:
     )
 
     try:
-        products = list_products(active_only=True)
+        mid = int(state.get("mailbox_id") or 0)
+        products = list_products_for_mailbox(mid, active_only=True) if mid > 0 else []
     except Exception:
         products = []
 
@@ -214,6 +216,7 @@ def run_inbound_graph(
     *,
     contact: dict,
     product: dict | None,
+    mailbox_id: int,
     thread_id: str,
     latest_message: str,
     thread_history: list[dict],
@@ -222,6 +225,7 @@ def run_inbound_graph(
         {
             "contact": contact,
             "product": product,
+            "mailbox_id": int(mailbox_id),
             "thread_id": thread_id,
             "latest_message": latest_message,
             "thread_history": thread_history,

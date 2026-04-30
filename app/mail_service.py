@@ -145,6 +145,89 @@ def fetch_unread_emails(mailbox_row: dict, limit: int = 20) -> list[dict]:
 
     return results
 
+
+def test_imap_connection(mailbox_row: dict, *, limit: int = 1) -> int:
+    """
+    仅用于连通性测试：登录 IMAP 并拉取最多 limit 封未读（可无未读）。
+    失败抛出异常；成功返回拉取到的未读数量。
+    """
+    host = (mailbox_row.get("imap_host") or "").strip()
+    port = int(mailbox_row.get("imap_port") or 993)
+    email_addr = (mailbox_row.get("email_address") or "").strip()
+    password = mailbox_row.get("password") or ""
+    logger.info("IMAP test %s:%s %s", host, port, email_addr)
+    with MailBox(host, port).login(email_addr, password) as mb:
+        msgs = list(mb.fetch(AND(seen=False), limit=limit, reverse=True))
+        logger.info("IMAP test unread peek %s", len(msgs))
+        return len(msgs)
+
+
+def _smtp_open_logged_in(mailbox_row: dict):
+    """建立 SMTP 连接并完成登录。调用方负责 quit/close。"""
+    ctx = ssl.create_default_context()
+    host = (mailbox_row.get("smtp_host") or "").strip()
+    port = int(mailbox_row.get("smtp_port") or 465)
+    user = (mailbox_row.get("email_address") or "").strip()
+    pw = mailbox_row.get("password") or ""
+    use_ssl = bool(mailbox_row.get("smtp_use_ssl", 1))
+    if not host:
+        raise ValueError("SMTP 主机 (smtp_host) 未配置")
+    if use_ssl:
+        s = smtplib.SMTP_SSL(host, port, context=ctx)
+        s.login(user, pw)
+        return s
+    s = smtplib.SMTP(host, port)
+    s.starttls(context=ctx)
+    s.login(user, pw)
+    return s
+
+
+def _smtp_quit_safe(s) -> None:
+    try:
+        s.quit()
+    except Exception:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def test_smtp_login(mailbox_row: dict) -> None:
+    """仅连接并 SMTP AUTH，不投递邮件。失败抛出异常。"""
+    host = (mailbox_row.get("smtp_host") or "").strip()
+    port = int(mailbox_row.get("smtp_port") or 465)
+    logger.info(
+        "SMTP test %s:%s ssl=%s", host, port, bool(mailbox_row.get("smtp_use_ssl", 1))
+    )
+    s = _smtp_open_logged_in(mailbox_row)
+    _smtp_quit_safe(s)
+
+
+def run_mailbox_transport_tests(mailbox_row: dict) -> dict:
+    """
+    依次测试 IMAP 与 SMTP（SMTP 仅登录，不发信）。
+    返回结构化结果，供 API 与仪表盘展示。
+    """
+    out: dict = {
+        "imap": {"ok": False, "peek_count": None, "error": None},
+        "smtp": {"ok": False, "error": None},
+    }
+    try:
+        n = test_imap_connection(mailbox_row, limit=1)
+        out["imap"]["ok"] = True
+        out["imap"]["peek_count"] = n
+    except Exception as e:
+        out["imap"]["error"] = str(e)
+        logger.error("mailbox IMAP test failed: %s", e, exc_info=True)
+    try:
+        test_smtp_login(mailbox_row)
+        out["smtp"]["ok"] = True
+    except Exception as e:
+        out["smtp"]["error"] = str(e)
+        logger.error("mailbox SMTP test failed: %s", e, exc_info=True)
+    return out
+
+
 def send_reply(
     mailbox_row: dict,
     original: dict,
@@ -370,20 +453,10 @@ def _text_to_html(text: str, sender_name: str = "") -> str:
     return _text_to_html_aliyun_web(text)
 
 def _smtp_send_message(mailbox_row: dict, msg: MIMEMultipart) -> None:
-    ctx = ssl.create_default_context()
-    host = (mailbox_row.get('smtp_host') or '').strip()
-    port = int(mailbox_row.get('smtp_port') or 465)
-    user = (mailbox_row.get('email_address') or '').strip()
-    pw = mailbox_row.get('password') or ''
-    use_ssl = bool(mailbox_row.get('smtp_use_ssl', 1))
-    if use_ssl:
-        with smtplib.SMTP_SSL(host, port, context=ctx) as s:
-            s.login(user, pw)
-            s.send_message(msg)
-    else:
-        with smtplib.SMTP(host, port) as s:
-            s.starttls(context=ctx)
-            s.login(user, pw)
-            s.send_message(msg)
+    s = _smtp_open_logged_in(mailbox_row)
+    try:
+        s.send_message(msg)
+    finally:
+        _smtp_quit_safe(s)
 
 

@@ -306,6 +306,7 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
     graph_result = run_inbound_graph(
         contact=contact,
         product=product,
+        mailbox_id=mailbox_id,
         thread_id=thread_id,
         latest_message=msg["body"],
         thread_history=thread_history,

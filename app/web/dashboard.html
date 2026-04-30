@@ -3,12 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>客服邮件工作台</title>
+<title>拓基时代 · 客服邮件工作台</title>
 <style>
 *{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#0f172a;color:#e2e8f0}
 .wrap{max-width:1480px;margin:0 auto;padding:20px}
 h1,h2,h3{margin:0}.top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:18px}
-.hero{max-width:760px}.hero p{color:#94a3b8;line-height:1.6;margin:8px 0 0}
+.hero{flex:1;min-width:min(100%,280px);max-width:920px}
+.brand-kicker{margin:0 0 10px;padding-bottom:10px;border-bottom:1px solid #1f2937;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.brand-kicker .brand-cn{font-size:15px;font-weight:700;color:#e2e8f0}
+.brand-kicker .brand-en{font-size:10px;font-weight:600;color:#64748b;letter-spacing:0.12em;text-transform:uppercase}
+.hero-body h1{font-size:1.75rem;font-weight:700;color:#e2e8f0}
+.hero-body{min-height:0}
+.hero p{color:#94a3b8;line-height:1.6;margin:8px 0 0}
 .controls{display:flex;gap:10px;flex-wrap:wrap}
 button,.btn{background:#6366f1;color:#fff;border:none;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;transition:all 0.2s ease}
 button:hover,.btn:hover{filter:brightness(1.15);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,0.2)}
@@ -80,6 +86,17 @@ textarea{min-height:90px;resize:vertical}
 .esc-eff-v{font-size:13px;font-weight:600;word-break:break-all;line-height:1.4;color:#e2e8f0}
 .esc-edit-actions{display:flex;gap:8px;margin-top:10px}
 .esc-edit-actions button{padding:8px 14px;font-size:13px;border-radius:8px}
+.subtabs-wrap{margin-bottom:4px;border-bottom:1px solid #1f2937;display:flex;gap:2px;flex-wrap:wrap;align-items:flex-end}
+.subtab{background:transparent;border:none;color:#94a3b8;padding:8px 12px 10px;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;border-radius:8px 8px 0 0;margin-bottom:-1px;white-space:nowrap}
+.subtab:hover{color:#cbd5e1}
+.subtab.active{color:#a5b4fc;border-bottom-color:#6366f1;background:rgba(99,102,241,0.12)}
+.icon-search-btn{width:40px;height:40px;padding:0;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;background:#1e293b;border:1px solid #334155;color:#cbd5e1;cursor:pointer}
+.icon-search-btn:hover{color:#e2e8f0;filter:brightness(1.08)}
+.icon-search-btn svg{flex-shrink:0}
+.mailbox-search-panel{margin:6px 0 12px;padding:12px 14px;background:#020617;border:1px solid #334155;border-radius:10px;max-width:520px}
+.mailbox-search-panel input{margin-bottom:0}
+.product-mailbox-toolbar{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px;margin-bottom:4px;border-bottom:1px solid #1f2937;padding-bottom:1px}
+.subtabs-inner{flex:1;min-width:160px;display:flex;flex-wrap:wrap;gap:2px;align-items:flex-end}
 </style>
 </head>
 <body>
@@ -87,8 +104,11 @@ textarea{min-height:90px;resize:vertical}
   <div id="banner" class="banner"></div>
   <div class="top">
     <div class="hero">
-      <h1>客服邮件工作台</h1>
-      <p>进程<strong>启动后默认开启收件轮询</strong>，仅在点击「停止轮询」或<strong>关闭进程</strong>后停止；可在「邮箱账户」绑定多台站点邮箱（阿里云企业邮、Gmail、Outlook、Yahoo、163 等，按需填写 IMAP/SMTP）。全局 <strong>兜底收件人</strong> 与<strong>可分配负责人名单</strong>请在「内部客服」页配置。系统仅被动接收入站邮件。</p>
+      <p class="brand-kicker"><span class="brand-cn">拓基时代</span><span class="brand-en">TUOJISHIDAI</span></p>
+      <div class="hero-body">
+        <h1>客服邮件工作台</h1>
+        <p>进程<strong>启动后默认开启收件轮询</strong>，仅在点击「停止轮询」或<strong>关闭进程</strong>后停止；可在「邮箱账户」绑定多台站点邮箱（阿里云企业邮、Gmail、Outlook、Yahoo、163 等，按需填写 IMAP/SMTP）。全局 <strong>兜底收件人</strong> 与<strong>可分配负责人名单</strong>请在「内部客服」页配置。系统仅被动接收入站邮件。</p>
+      </div>
     </div>
     <div class="controls">
       <button class="success" onclick="api('POST','/start-auto',null,this)">启动轮询</button>
@@ -121,15 +141,26 @@ textarea{min-height:90px;resize:vertical}
   <section id="tab-inbox" class="panel active">
     <div class="grid">
       <div class="box">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <h3>会话概览</h3>
-        <div style="margin-bottom:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-          <label style="font-size:12px;color:#94a3b8">当前邮箱</label>
-          <select id="mailbox-filter" onchange="loadInbox()" style="max-width:340px;margin:0">
-            <option value="">全部</option>
-          </select>
-          <span id="mailbox-meta" class="muted small"></span>
-        </div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:12px">
+          <div style="flex:1;min-width:220px">
+            <h3 style="margin-bottom:8px">会话概览</h3>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <label style="font-size:12px;color:#94a3b8;margin:0">当前邮箱</label>
+                <select id="mailbox-filter" onchange="loadInbox()" style="max-width:340px;margin:0">
+                  <option value="">全部</option>
+                </select>
+                <button type="button" class="icon-search-btn" id="inbox-mailbox-search-btn" title="按关键词搜索邮箱" aria-expanded="false" aria-controls="inbox-mailbox-search-panel" onclick="toggleInboxMailboxSearch(event)">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                </button>
+                <span id="mailbox-meta" class="muted small"></span>
+              </div>
+              <div id="inbox-mailbox-search-panel" class="mailbox-search-panel" hidden>
+                <label class="muted small" style="display:block;margin-bottom:6px">筛选下拉列表（匹配名称、邮箱、ID）</label>
+                <input type="search" id="inbox-mailbox-search" placeholder="输入关键词…" autocomplete="off" oninput="onInboxMailboxSearchInput()" style="max-width:400px">
+              </div>
+            </div>
+          </div>
           <button class="danger small" onclick="deleteAllThreads()">清空全部会话</button>
         </div>
         <div id="thread-list" class="list"><div class="empty">加载中...</div></div>
@@ -209,6 +240,16 @@ textarea{min-height:90px;resize:vertical}
         <input id="product-fallback-email" placeholder="另一内部邮箱（负责人缺席时）">
         <label>关键词（匹配来信用语）</label>
         <input id="product-keywords" placeholder="英文或中文关键词，逗号分隔，例：home, sleep, fitness, 筋膜枪">
+        <label style="margin-top:4px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+          <span style="flex:1;line-height:1.45">独立站邮箱（仅勾选邮箱下用关键词参与匹配）</span>
+          <button type="button" class="icon-search-btn" style="width:36px;height:36px" id="product-form-mailbox-search-btn" title="筛选邮箱列表" aria-expanded="false" aria-controls="product-form-mailbox-search-panel" onclick="toggleProductFormMailboxSearch(event)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </button>
+        </label>
+        <div id="product-form-mailbox-search-panel" class="mailbox-search-panel" hidden>
+          <input type="search" id="product-form-mailbox-search" placeholder="输入关键词筛选下方复选框…" autocomplete="off" oninput="onProductFormMailboxSearchInput()">
+        </div>
+        <div id="product-mailbox-checks" class="muted small" style="margin-bottom:12px;line-height:1.5">加载邮箱列表…</div>
         <button onclick="saveProduct()">保存产品</button>
       </div>
       <div class="box">
@@ -224,6 +265,17 @@ textarea{min-height:90px;resize:vertical}
       </div>
     </div>
     <div class="box" style="margin-top:16px">
+      <div class="product-mailbox-toolbar">
+        <div class="subtabs-inner" id="product-mailbox-subtabs" role="tablist" aria-label="按邮箱筛选产品"></div>
+        <button type="button" class="icon-search-btn" id="product-subtab-mailbox-search-btn" title="按关键词筛选邮箱标签" aria-expanded="false" aria-controls="product-subtab-mailbox-search-panel" onclick="toggleProductSubtabMailboxSearch(event)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </button>
+      </div>
+      <div id="product-subtab-mailbox-search-panel" class="mailbox-search-panel" hidden>
+        <label class="muted small" style="display:block;margin-bottom:6px">筛选上方邮箱标签（名称、邮箱、ID）</label>
+        <input type="search" id="product-subtab-mailbox-search" placeholder="输入关键词…" autocomplete="off" oninput="onProductSubtabMailboxSearchInput()">
+      </div>
+      <p id="product-mailbox-subtabs-hint" class="muted small" style="margin:0 0 10px;line-height:1.5"></p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:16px;flex:1">
           <h3 style="margin:0">产品列表</h3>
@@ -233,8 +285,8 @@ textarea{min-height:90px;resize:vertical}
       </div>
       <div class="table-wrap">
         <table class="tbl">
-          <thead><tr><th>ID</th><th>品牌</th><th>名称</th><th>ASIN</th><th>内部负责人</th><th>内部邮箱</th><th>关键词</th><th>操作</th></tr></thead>
-          <tbody id="product-rows"><tr><td colspan="8" class="empty">加载中...</td></tr></tbody>
+          <thead><tr id="product-thead-row"><th>ID</th><th>品牌</th><th>名称</th><th>ASIN</th><th>邮箱账户</th><th>内部负责人</th><th>内部邮箱</th><th>关键词</th><th>操作</th></tr></thead>
+          <tbody id="product-rows"><tr><td colspan="9" class="empty">加载中...</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -373,7 +425,7 @@ textarea{min-height:90px;resize:vertical}
       </div>
       <div class="box">
         <h3>已配置账户</h3>
-        <p class="muted" style="margin:0 0 12px;font-size:12px">「测试」会尝试 IMAP 读取未读（可无未读）。</p>
+        <p class="muted" style="margin:0 0 12px;font-size:12px">「测试」会依次检测：IMAP 登录并预览未读（可无未读）、SMTP 连接并登录（不发信）。</p>
         <div class="table-wrap">
           <table class="tbl">
             <thead><tr><th>ID</th><th>名称 / 邮箱</th><th>IMAP</th><th>启用</th><th>最后检查 / 错误</th><th>操作</th></tr></thead>
@@ -434,34 +486,256 @@ async function api(method,url,body,btn=null){
   }
 }
 
+function applyProductMailboxChecks(ids){
+  document.querySelectorAll('.product-mb-cb').forEach(cb=>{
+    cb.checked=ids.map(Number).includes(parseInt(cb.value,10));
+  });
+}
+const PRODUCT_LIST_MAILBOX_KEY='dashboard_product_list_mailbox_id';
+function initProductListMailboxFilter(){
+  if(window._productListMailboxId!==undefined)return;
+  try{
+    const s=sessionStorage.getItem(PRODUCT_LIST_MAILBOX_KEY);
+    window._productListMailboxId=(s===null||s==='')?'':String(s);
+  }catch(e){
+    window._productListMailboxId='';
+  }
+}
+function validateProductListMailboxFilter(){
+  const cur=window._productListMailboxId;
+  if(cur===''||cur===undefined||cur===null)return;
+  const rows=window._mailboxList||[];
+  if(!rows.some(m=>String(m.id)===String(cur))){
+    window._productListMailboxId='';
+    try{sessionStorage.setItem(PRODUCT_LIST_MAILBOX_KEY,'');}catch(e){}
+  }
+}
+function rebuildMailboxFilterSelect(){
+  const sel=document.getElementById('mailbox-filter');
+  if(!sel)return;
+  const cur=sel.value;
+  const q=(window._inboxMailboxSearchQuery||'').trim().toLowerCase();
+  const list=window._mailboxList||[];
+  const picked=[];
+  for(const m of list){
+    const idStr=String(m.id);
+    const hay=((m.label||'')+' '+(m.email_address||'')+' '+idStr).toLowerCase();
+    if(!q||hay.includes(q)) picked.push(m);
+  }
+  if(cur&&cur!==''){
+    const has=picked.some(m=>String(m.id)===cur);
+    if(!has){
+      const m=list.find(x=>String(x.id)===cur);
+      if(m) picked.unshift(m);
+    }
+  }
+  let html='<option value="">全部</option>';
+  for(const m of picked){
+    html+='<option value="'+String(m.id)+'">'+(m.label||m.email_address||m.id)+' — '+esc(m.email_address||'')+'</option>';
+  }
+  sel.innerHTML=html;
+  const opts=[...sel.options].map(o=>o.value);
+  if(opts.includes(cur)) sel.value=cur;
+}
+function toggleInboxMailboxSearch(ev){
+  if(ev) ev.preventDefault();
+  const p=document.getElementById('inbox-mailbox-search-panel');
+  const btn=document.getElementById('inbox-mailbox-search-btn');
+  if(!p)return;
+  const open=p.hidden;
+  p.hidden=!open;
+  if(btn) btn.setAttribute('aria-expanded', open?'true':'false');
+  if(open){
+    const inp=document.getElementById('inbox-mailbox-search');
+    if(inp) inp.focus();
+  }
+}
+function onInboxMailboxSearchInput(){
+  window._inboxMailboxSearchQuery=document.getElementById('inbox-mailbox-search').value||'';
+  rebuildMailboxFilterSelect();
+}
+function toggleProductSubtabMailboxSearch(ev){
+  if(ev) ev.preventDefault();
+  const p=document.getElementById('product-subtab-mailbox-search-panel');
+  const btn=document.getElementById('product-subtab-mailbox-search-btn');
+  if(!p)return;
+  const open=p.hidden;
+  p.hidden=!open;
+  if(btn) btn.setAttribute('aria-expanded', open?'true':'false');
+  if(open){
+    const inp=document.getElementById('product-subtab-mailbox-search');
+    if(inp) inp.focus();
+  }
+}
+function onProductSubtabMailboxSearchInput(){
+  window._productSubtabSearchQuery=document.getElementById('product-subtab-mailbox-search').value||'';
+  renderProductMailboxSubtabs();
+}
+function toggleProductFormMailboxSearch(ev){
+  if(ev) ev.preventDefault();
+  const p=document.getElementById('product-form-mailbox-search-panel');
+  const btn=document.getElementById('product-form-mailbox-search-btn');
+  if(!p)return;
+  const open=p.hidden;
+  p.hidden=!open;
+  if(btn) btn.setAttribute('aria-expanded', open?'true':'false');
+  if(open){
+    const inp=document.getElementById('product-form-mailbox-search');
+    if(inp) inp.focus();
+  }
+}
+function applyProductFormMailboxSearchFilter(){
+  const inp=document.getElementById('product-form-mailbox-search');
+  if(!inp)return;
+  const q=(inp.value||'').trim().toLowerCase();
+  document.querySelectorAll('#product-mailbox-checks label').forEach(lab=>{
+    const t=(lab.textContent||'').toLowerCase();
+    lab.style.display=!q||t.includes(q)?'':'none';
+  });
+}
+function onProductFormMailboxSearchInput(){
+  applyProductFormMailboxSearchFilter();
+}
+function setProductListMailboxFilter(mid){
+  initProductListMailboxFilter();
+  const v=(mid===undefined||mid===null||String(mid)==='')?'':String(mid);
+  window._productListMailboxId=v;
+  try{sessionStorage.setItem(PRODUCT_LIST_MAILBOX_KEY,v);}catch(e){}
+  renderProductMailboxSubtabs();
+  updateProductSubtabsHint();
+  renderProductTableRows();
+}
+function renderProductMailboxSubtabs(){
+  const host=document.getElementById('product-mailbox-subtabs');
+  if(!host)return;
+  initProductListMailboxFilter();
+  const rows=window._mailboxList||[];
+  const cur=String(window._productListMailboxId||'');
+  const q=(window._productSubtabSearchQuery||'').trim().toLowerCase();
+  let html='<button type="button" class="subtab'+(cur===''?' active':'')+'" data-mid="" onclick="setProductListMailboxFilter(this.dataset.mid)">全部产品</button>';
+  for(const m of rows){
+    const idStr=String(m.id);
+    const hay=((m.label||'')+' '+(m.email_address||'')+' '+idStr).toLowerCase();
+    if(q && !hay.includes(q) && idStr!==cur) continue;
+    const lab=esc(m.label||m.email_address||idStr);
+    html+='<button type="button" class="subtab'+(cur===idStr?' active':'')+'" data-mid="'+escAttr(idStr)+'" onclick="setProductListMailboxFilter(this.dataset.mid)">'+lab+'</button>';
+  }
+  host.innerHTML=html;
+}
+function updateProductSubtabsHint(){
+  const el=document.getElementById('product-mailbox-subtabs-hint');
+  if(!el)return;
+  const cur=String(window._productListMailboxId||'');
+  const all=window._allProducts;
+  if(!all){
+    el.textContent='加载产品中…';
+    return;
+  }
+  if(cur===''){
+    el.textContent='「全部产品」查看所有条目；点选某一邮箱后，列表仅显示已关联到该邮箱的产品。邮箱较多时，可点击右侧 🔍 输入关键词筛选上方标签。保存新产品时，若正筛选某一邮箱，会自动勾选该邮箱。';
+    return;
+  }
+  const mid=parseInt(cur,10);
+  const m=(window._mailboxList||[]).find(x=>String(x.id)===String(cur));
+  const label=m?(m.label||m.email_address||String(mid)):'邮箱 #'+cur;
+  const n=isNaN(mid)?0:all.filter(p=>(p.mailbox_ids||[]).includes(mid)).length;
+  el.textContent='当前邮箱：'+label+' · 本收件箱下已关联 '+n+' 个产品（仅展示这些）。';
+}
+function renderProductTableRows(){
+  const tbody=document.getElementById('product-rows');
+  const thRow=document.getElementById('product-thead-row');
+  if(!tbody)return;
+  const raw=window._allProducts;
+  if(raw===undefined){
+    tbody.innerHTML='<tr><td colspan="9" class="empty">加载中...</td></tr>';
+    return;
+  }
+  const all=raw||[];
+  initProductListMailboxFilter();
+  const cur=String(window._productListMailboxId||'');
+  const showMbCol=cur==='';
+  let midNum=NaN;
+  if(cur!=='') midNum=parseInt(cur,10);
+  let list=all;
+  if(cur!=='' && !isNaN(midNum)) list=all.filter(p=>(p.mailbox_ids||[]).includes(midNum));
+  const baseCols=showMbCol?9:8;
+  if(thRow){
+    if(showMbCol){
+      thRow.innerHTML='<th>ID</th><th>品牌</th><th>名称</th><th>ASIN</th><th>邮箱账户</th><th>内部负责人</th><th>内部邮箱</th><th>关键词</th><th>操作</th>';
+    }else{
+      thRow.innerHTML='<th>ID</th><th>品牌</th><th>名称</th><th>ASIN</th><th>内部负责人</th><th>内部邮箱</th><th>关键词</th><th>操作</th>';
+    }
+  }
+  if(!all.length){
+    tbody.innerHTML='<tr><td colspan="'+baseCols+'" class="empty">暂无产品</td></tr>';
+    return;
+  }
+  if(!list.length){
+    const msg=cur!==''?'当前邮箱下暂无关联产品。可新建产品并保存，或切换到「全部产品」编辑其它条目并勾选本邮箱。':'没有符合条件的产品';
+    tbody.innerHTML='<tr><td colspan="'+baseCols+'" class="empty">'+msg+'</td></tr>';
+    return;
+  }
+  tbody.innerHTML=list.map(p=>{
+    const mids=p.mailbox_ids||[];
+    const labels=(window._mailboxList||[]).filter(m=>mids.includes(m.id)).map(m=>(m.label||m.email_address||String(m.id))).join(', ');
+    const mbCell=labels||'<span class="muted">（未勾选）</span>';
+    const mbTd=showMbCol?('<td class="small muted">'+mbCell+'</td>'):'';
+    return `<tr>
+    <td>${esc(p.id)}</td>
+    <td class="muted small">${esc(p.brand||'—')}</td>
+    <td>${esc(p.name)}</td>
+    <td class="muted small">${esc(p.asin||'—')}</td>${mbTd}
+    <td>${esc(p.owner_name||'—')}</td>
+    <td class="muted small">${esc(p.owner_email||'—')}</td>
+    <td class="small">${esc((p.keywords||[]).slice(0,4).join(', '))}</td>
+    <td>
+      <button class="secondary small" onclick='prefillProduct(${JSON.stringify(p)})'>编辑</button>
+      <button class="danger small" onclick='deleteProduct(${JSON.stringify(p.id)})'>删除</button>
+    </td>
+  </tr>`;
+  }).join('');
+  filterProducts();
+}
+function renderProductMailboxChecks(){
+  const box=document.getElementById('product-mailbox-checks');
+  if(!box) return;
+  const rows=window._mailboxList||[];
+  if(!rows.length){
+    box.innerHTML='<span class="muted">暂无邮箱，请先在「邮箱账户」中添加；未勾选则这些收件箱下关键词不会匹配到本产品。</span>';
+    return;
+  }
+  box.innerHTML=rows.map(m=>
+    '<label style="display:block;margin-bottom:6px;font-size:13px;color:#e2e8f0">'+
+    '<input type="checkbox" class="product-mb-cb" value="'+String(m.id)+'"> '+
+    esc(m.label||m.email_address||m.id)+' <span class="muted">'+esc(m.email_address||'')+'</span>'+
+    '</label>'
+  ).join('');
+  applyProductFormMailboxSearchFilter();
+}
 async function loadMailboxAccounts(){
   try{
     const d=await fetchJson('/mailboxes');
     window._mailboxList=d.mailboxes||[];
-    const sel=document.getElementById('mailbox-filter');
-    if(sel){
-      const cur=sel.value;
-      let html='<option value="">全部</option>';
-      for(const m of window._mailboxList){
-        html+='<option value="'+String(m.id)+'">'+(m.label||m.email_address||m.id)+' — '+esc(m.email_address||'')+'</option>';
-      }
-      sel.innerHTML=html;
-      if(cur!==undefined&&cur!==''){
-        const opts=[...sel.options].map(o=>o.value);
-        if(opts.includes(cur)) sel.value=cur;
+    rebuildMailboxFilterSelect();
+    const tbody=document.getElementById('mailbox-rows');
+    if(tbody){
+      const rows=window._mailboxList;
+      if(!rows.length){tbody.innerHTML='<tr><td colspan="6" class="empty">暂无邮箱，请在左侧添加</td></tr>';}
+      else{
+        tbody.innerHTML=rows.map(m=>{
+          const chk=m.enabled?'<span class="pill satisfied">是</span>':'<span class="pill not-escalated">否</span>';
+          const lc=(m.last_checked_at||'').slice(0,16);
+          const err=(m.last_error||'').trim();
+          const st=err?('<span class="muted" style="color:#fca5a5">'+esc(err.slice(0,80))+'</span>'):(lc||'—');
+          return '<tr><td class="muted">'+m.id+'</td><td><strong>'+esc(m.label||'')+'</strong><div class="muted small">'+esc(m.email_address||'')+'</div></td><td class="muted small">'+esc(m.imap_host||'')+':'+esc(String(m.imap_port||''))+'</td><td>'+chk+'</td><td class="small">'+esc(lc||'')+(lc?'<br>':'')+st+'</td><td><button type="button" class="secondary small" onclick="editMailboxRow('+m.id+')">编辑</button> <button type="button" class="secondary small" onclick="testMailboxRow('+m.id+',this)">测试</button> <button type="button" class="danger small" onclick="deleteMailboxRow('+m.id+')">删除</button></td></tr>';
+        }).join('');
       }
     }
-    const tbody=document.getElementById('mailbox-rows');
-    if(!tbody) return;
-    const rows=window._mailboxList;
-    if(!rows.length){tbody.innerHTML='<tr><td colspan="6" class="empty">暂无邮箱，请在左侧添加</td></tr>';return;}
-    tbody.innerHTML=rows.map(m=>{
-      const chk=m.enabled?'<span class="pill satisfied">是</span>':'<span class="pill not-escalated">否</span>';
-      const lc=(m.last_checked_at||'').slice(0,16);
-      const err=(m.last_error||'').trim();
-      const st=err?('<span class="muted" style="color:#fca5a5">'+esc(err.slice(0,80))+'</span>'):(lc||'—');
-      return '<tr><td class="muted">'+m.id+'</td><td><strong>'+esc(m.label||'')+'</strong><div class="muted small">'+esc(m.email_address||'')+'</div></td><td class="muted small">'+esc(m.imap_host||'')+':'+esc(String(m.imap_port||''))+'</td><td>'+chk+'</td><td class="small">'+esc(lc||'')+(lc?'<br>':'')+st+'</td><td><button type="button" class="secondary small" onclick="editMailboxRow('+m.id+')">编辑</button> <button type="button" class="secondary small" onclick="testMailboxRow('+m.id+',this)">测试</button> <button type="button" class="danger small" onclick="deleteMailboxRow('+m.id+')">删除</button></td></tr>';
-    }).join('');
+    validateProductListMailboxFilter();
+    renderProductMailboxSubtabs();
+    updateProductSubtabsHint();
+    if(window._allProducts!==undefined) renderProductTableRows();
+    renderProductMailboxChecks();
   }catch(err){console.error(err);}
 }
 function fillMailboxTemplate(kind){
@@ -582,7 +856,11 @@ async function testMailboxRow(id,btn){
   if(btn){btn.disabled=true;btn.textContent='测试中...';}
   try{
     const r=await fetchJson('/mailboxes/'+encodeURIComponent(id)+'/test',{method:'POST'});
-    showBanner('连接成功，拉取预览 '+r.peek_count+' 封',true);
+    const im=r.imap||{};
+    const sm=r.smtp||{};
+    const imLine=im.ok?('IMAP ✓ 未读预览 '+String(im.peek_count??0)+' 封'):('IMAP ✗ '+(im.error||'失败'));
+    const smLine=sm.ok?'SMTP ✓ 登录成功':('SMTP ✗ '+(sm.error||'失败'));
+    showBanner(imLine+'；'+smLine, r.status==='ok');
   }catch(err){showBanner('测试失败: '+err.message,false);}
   finally{if(btn){btn.disabled=false;btn.textContent=old||'测试';}}
 }
@@ -902,23 +1180,13 @@ function filterProducts(){
 }
 
 async function loadProducts(){
+  initProductListMailboxFilter();
   const data=await fetchJson('/products');
-  const tbody=document.getElementById('product-rows');
-  if(!data.products.length){tbody.innerHTML='<tr><td colspan="8" class="empty">暂无产品</td></tr>';return;}
-  tbody.innerHTML=data.products.map(p=>`<tr>
-    <td>${esc(p.id)}</td>
-    <td class="muted small">${esc(p.brand||'—')}</td>
-    <td>${esc(p.name)}</td>
-    <td class="muted small">${esc(p.asin||'—')}</td>
-    <td>${esc(p.owner_name||'—')}</td>
-    <td class="muted small">${esc(p.owner_email||'—')}</td>
-    <td class="small">${esc((p.keywords||[]).slice(0,4).join(', '))}</td>
-    <td>
-      <button class="secondary small" onclick='prefillProduct(${JSON.stringify(p)})'>编辑</button>
-      <button class="danger small" onclick='deleteProduct(${JSON.stringify(p.id)})'>删除</button>
-    </td>
-  </tr>`).join('');
-  filterProducts();
+  window._allProducts=data.products||[];
+  validateProductListMailboxFilter();
+  renderProductMailboxSubtabs();
+  updateProductSubtabsHint();
+  renderProductTableRows();
 }
 
 function prefillProduct(p){
@@ -928,6 +1196,7 @@ function prefillProduct(p){
   document.getElementById('product-brand').value=p.brand||'';
   document.getElementById('product-fallback-email').value=p.fallback_owner_email||'';
   document.getElementById('product-keywords').value=(p.keywords||[]).join(', ');
+  applyProductMailboxChecks(p.mailbox_ids||[]);
   const em=(p.owner_email||'').trim().toLowerCase();
   const name=(p.owner_name||'').trim();
   const sel=document.getElementById('product-owner-select');
@@ -974,6 +1243,13 @@ async function saveProduct(){
     ownerEmail=(opt&&opt.value)?opt.value.trim():'';
     ownerName=(opt&&opt.textContent)?opt.textContent.trim():'';
   }
+  let mailboxIds=[...document.querySelectorAll('.product-mb-cb:checked')].map(cb=>parseInt(cb.value,10)).filter(n=>!isNaN(n));
+  const curF=String(window._productListMailboxId||'');
+  if(curF!==''){
+    const cm=parseInt(curF,10);
+    if(!isNaN(cm)&&!mailboxIds.includes(cm)) mailboxIds.push(cm);
+  }
+  mailboxIds=[...new Set(mailboxIds)].sort((a,b)=>a-b);
   await api('POST','/products',{
     id:document.getElementById('product-id').value.trim(),
     asin:document.getElementById('product-asin').value.trim(),
@@ -987,6 +1263,7 @@ async function saveProduct(){
     intro:'',
     description:'',
     keywords:splitList(document.getElementById('product-keywords').value),
+    mailbox_ids:mailboxIds,
     is_active:true,
   });
 }
@@ -1077,7 +1354,8 @@ async function saveEscalationSettings(){
 async function loadAll(){
   try{
     await loadStatus();
-    await Promise.all([loadMailboxAccounts(),loadEscalationForm(),loadInbox(),loadEscalations(),loadIntents(),loadSupportStaff(),loadProducts(),loadLogs()]);
+    await loadMailboxAccounts();
+    await Promise.all([loadEscalationForm(),loadInbox(),loadEscalations(),loadIntents(),loadSupportStaff(),loadProducts(),loadLogs()]);
     clearBanner();
   }catch(err){
     showBanner('加载失败: '+err.message,false);

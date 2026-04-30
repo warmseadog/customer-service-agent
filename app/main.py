@@ -39,7 +39,7 @@ from app.database import (
     list_support_staff,
     update_mailbox,
 )
-from app.mail_service import fetch_unread_emails
+from app.mail_service import fetch_unread_emails, run_mailbox_transport_tests
 from app.services.lead_service import (
     list_intent_rows,
     remove_all_intents,
@@ -61,7 +61,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _log_buffer: deque = deque(maxlen=500)
-_dashboard_path = Path(__file__).parent / "web" / "dashboard.html"
+_web_dir = Path(__file__).parent / "web"
+_dashboard_path = _web_dir / "dashboard.html"
 _bg_task = None
 _is_running = False
 _check_lock = asyncio.Lock()
@@ -324,11 +325,23 @@ async def mailbox_test(mailbox_id: int):
     row = get_mailbox_raw(mailbox_id)
     if not row:
         raise HTTPException(status_code=404, detail="mailbox not found")
-    try:
-        items = fetch_unread_emails(row, limit=1)
-        return {"status": "ok", "mailbox_id": mailbox_id, "peek_count": len(items)}
-    except Exception as exc:
-        _raise_server_error(exc)
+    result = run_mailbox_transport_tests(row)
+    imap_ok = bool(result["imap"]["ok"])
+    smtp_ok = bool(result["smtp"]["ok"])
+    if imap_ok and smtp_ok:
+        overall = "ok"
+    elif imap_ok or smtp_ok:
+        overall = "partial"
+    else:
+        overall = "failed"
+    peek = result["imap"]["peek_count"] if imap_ok else 0
+    return {
+        "status": overall,
+        "mailbox_id": mailbox_id,
+        "imap": result["imap"],
+        "smtp": result["smtp"],
+        "peek_count": int(peek or 0),
+    }
 
 
 # ─── 产品库（含 owner 字段，1A 唯一维护入口） ───────────────────────────────────

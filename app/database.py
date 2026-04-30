@@ -10,7 +10,8 @@ database.py — SQLite 持久化层
   6. 升级事件（escalation_events）
   7. 全局升级收件覆盖（support_escalation_settings，单行）
   8. 内部客服名单（support_staff）：产品负责人下拉选用
-  9. 外呼历史（campaigns/outreach_messages）— 保留表结构供数据兼容，不再写入新数据
+  9. 邮箱账户（mailboxes）与多对多关联表 mailbox_products（某邮箱下关键词仅匹配已关联产品）
+  10. 外呼历史（campaigns/outreach_messages）— 保留表结构供数据兼容，不再写入新数据
 """
 
 from __future__ import annotations
@@ -116,6 +117,26 @@ def _seed_support_staff_if_needed(conn: sqlite3.Connection) -> None:
             )
         except Exception:
             pass
+
+
+def _ensure_mailbox_products_table(conn: sqlite3.Connection) -> None:
+    """产品与邮箱账户多对多：仅关联集内产品参与该邮箱的关键词匹配。"""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mailbox_products (
+            mailbox_id  INTEGER NOT NULL,
+            product_id  TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            PRIMARY KEY (mailbox_id, product_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_mailbox_products_product_id
+        ON mailbox_products (product_id)
+        """
+    )
 
 
 def _seed_products_if_needed(conn: sqlite3.Connection) -> None:
@@ -423,6 +444,7 @@ def init_db() -> None:
     _ensure_column(conn, "intent_results", "escalated", "INTEGER NOT NULL DEFAULT 0")
 
     ensure_mailboxes_schema_and_migrate(conn)
+    _ensure_mailbox_products_table(conn)
 
     _seed_support_staff_if_needed(conn)
     _seed_products_if_needed(conn)
@@ -644,7 +666,7 @@ def delete_all_creators() -> int:
 
 # ─── products ─────────────────────────────────────────────────────────────────
 
-def list_products(active_only: bool = False) -> list[dict]:
+def list_products(active_only: bool = False, *, with_mailbox_ids: bool = False) -> list[dict]:
     conn = _get_conn()
     sql = "SELECT * FROM products"
     params: tuple[Any, ...] = ()
@@ -653,8 +675,86 @@ def list_products(active_only: bool = False) -> list[dict]:
         params = (1,)
     sql += " ORDER BY updated_at DESC, id DESC"
     rows = conn.execute(sql, params).fetchall()
+    products = [_row_to_product(row) for row in rows if row]
+    if with_mailbox_ids and products:
+        ids = [str(pr["id"]) for pr in products]
+        ph = ",".join("?" * len(ids))
+        link_rows = conn.execute(
+            f"SELECT product_id, mailbox_id FROM mailbox_products WHERE product_id IN ({ph}) ORDER BY mailbox_id",
+            ids,
+        ).fetchall()
+        by_pid: dict[str, list[int]] = {}
+        for lr in link_rows:
+            by_pid.setdefault(str(lr["product_id"]), []).append(int(lr["mailbox_id"]))
+        for pr in products:
+            pr["mailbox_ids"] = by_pid.get(str(pr["id"]), [])
+    conn.close()
+    return products
+
+
+def list_products_for_mailbox(mailbox_id: int, *, active_only: bool = True) -> list[dict]:
+    conn = _get_conn()
+    sql = """
+        SELECT p.* FROM products p
+        INNER JOIN mailbox_products mp ON mp.product_id = p.id AND mp.mailbox_id = ?
+    """
+    params: list[Any] = [mailbox_id]
+    if active_only:
+        sql += " WHERE p.is_active = ?"
+        params.append(1)
+    sql += " ORDER BY p.updated_at DESC, p.id DESC"
+    rows = conn.execute(sql, tuple(params)).fetchall()
     conn.close()
     return [_row_to_product(row) for row in rows if row]
+
+
+def list_mailbox_ids_for_product(product_id: str) -> list[int]:
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT mailbox_id FROM mailbox_products WHERE product_id = ? ORDER BY mailbox_id",
+        (str(product_id),),
+    ).fetchall()
+    conn.close()
+    return [int(r["mailbox_id"]) for r in rows]
+
+
+def replace_product_mailboxes(product_id: str, mailbox_ids: list[int]) -> None:
+    pid = str(product_id or "").strip()
+    if not pid:
+        raise ValueError("产品 ID 无效")
+    seen: set[int] = set()
+    clean: list[int] = []
+    for x in mailbox_ids:
+        try:
+            mid = int(x)
+        except (TypeError, ValueError):
+            continue
+        if mid < 1 or mid in seen:
+            continue
+        seen.add(mid)
+        clean.append(mid)
+    conn = _get_conn()
+    if clean:
+        ph = ",".join("?" * len(clean))
+        found = {
+            int(r["id"])
+            for r in conn.execute(
+                f"SELECT id FROM mailboxes WHERE id IN ({ph})", clean
+            ).fetchall()
+        }
+        clean = [m for m in clean if m in found]
+    conn.execute("DELETE FROM mailbox_products WHERE product_id = ?", (pid,))
+    now = _now_iso()
+    for mid in clean:
+        conn.execute(
+            """
+            INSERT INTO mailbox_products (mailbox_id, product_id, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (mid, pid, now),
+        )
+    conn.commit()
+    conn.close()
 
 
 def get_product(product_id: str) -> dict | None:
@@ -735,6 +835,7 @@ def upsert_product(data: dict) -> dict:
 
 def delete_product(product_id: str) -> bool:
     conn = _get_conn()
+    conn.execute("DELETE FROM mailbox_products WHERE product_id = ?", (product_id,))
     deleted = conn.execute("DELETE FROM products WHERE id = ?", (product_id,)).rowcount
     conn.commit()
     conn.close()
@@ -743,6 +844,7 @@ def delete_product(product_id: str) -> bool:
 
 def delete_all_products() -> int:
     conn = _get_conn()
+    conn.execute("DELETE FROM mailbox_products")
     deleted = conn.execute("DELETE FROM products").rowcount
     conn.commit()
     conn.close()
@@ -1432,6 +1534,7 @@ def delete_all_data() -> dict:
         "tickets": conn.execute("DELETE FROM tickets").rowcount,
         "campaigns": conn.execute("DELETE FROM campaigns").rowcount,
         "creators": conn.execute("DELETE FROM creators").rowcount,
+        "mailbox_products": conn.execute("DELETE FROM mailbox_products").rowcount,
         "products": conn.execute("DELETE FROM products").rowcount,
     }
     conn.commit()
@@ -1635,6 +1738,7 @@ def update_mailbox(mailbox_id: int, payload: dict) -> dict | None:
 
 def delete_mailbox(mailbox_id: int) -> bool:
     conn = _get_conn()
+    conn.execute("DELETE FROM mailbox_products WHERE mailbox_id = ?", (mailbox_id,))
     n = conn.execute("DELETE FROM mailboxes WHERE id = ?", (mailbox_id,)).rowcount
     conn.commit()
     conn.close()
