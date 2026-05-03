@@ -42,6 +42,10 @@ def _get_conn() -> sqlite3.Connection:
         conn.execute("PRAGMA busy_timeout=5000;")
     except sqlite3.Error:
         pass
+    try:
+        conn.execute("PRAGMA foreign_keys=ON;")
+    except sqlite3.Error:
+        pass
     return conn
 
 
@@ -451,14 +455,468 @@ def init_db() -> None:
     _ensure_column(conn, "intent_results", "cs_tone", "TEXT")
     _ensure_column(conn, "intent_results", "escalated", "INTEGER NOT NULL DEFAULT 0")
 
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT NOT NULL UNIQUE,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions (token)")
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions (expires_at)"
+    )
+
     ensure_mailboxes_schema_and_migrate(conn)
     _ensure_mailbox_products_table(conn)
+
+    _migrate_users_table_remove_role_check(conn)
+    _init_team_rbac_tables(conn)
 
     _seed_support_staff_if_needed(conn)
     _seed_products_if_needed(conn)
     conn.commit()
     conn.close()
     logger.info("✅ 数据库初始化完成")
+
+
+# ─── users / sessions（仪表盘 RBAC）──────────────────────────────────────────
+
+_VALID_ROLES = frozenset({"admin", "operator", "viewer", "team_lead", "team_member"})
+
+
+def _migrate_users_table_remove_role_check(conn: sqlite3.Connection) -> None:
+    """SQLite 无法 ALTER CHECK；旧库带 CHECK 时重建 users 以支持 team_lead / team_member。"""
+    row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").fetchone()
+    sql = (row["sql"] or "") if row else ""
+    if "CHECK (role IN" not in sql:
+        return
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS _users_rebuild AS SELECT * FROM users WHERE 0;
+        DROP TABLE IF EXISTS _users_rebuild;
+        ALTER TABLE user_sessions RENAME TO user_sessions_bak;
+        ALTER TABLE users RENAME TO users_old;
+        CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO users SELECT * FROM users_old;
+        DROP TABLE users_old;
+        CREATE TABLE user_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT NOT NULL UNIQUE,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
+        INSERT INTO user_sessions SELECT * FROM user_sessions_bak;
+        DROP TABLE user_sessions_bak;
+        CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions (token);
+        CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions (expires_at);
+        """
+    )
+    conn.execute("PRAGMA foreign_keys=ON")
+
+
+def _init_team_rbac_tables(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS teams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL DEFAULT '',
+            lead_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS team_mailboxes (
+            team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+            mailbox_id INTEGER NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+            PRIMARY KEY (team_id, mailbox_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_team_mailboxes_mailbox ON team_mailboxes (mailbox_id)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_mailboxes (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            mailbox_id INTEGER NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+            PRIMARY KEY (user_id, mailbox_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_user_mailboxes_mailbox ON user_mailboxes (mailbox_id)"
+    )
+
+
+def rbac_mailbox_ids_for_user(user_id: int, role: str) -> frozenset[int] | None:
+    """
+    None: 不按邮箱过滤（admin / operator / viewer）。
+    frozenset: 仅限这些 mailbox_id（team_lead / team_member）；空集表示无权限数据。
+    """
+    r = (role or "").strip()
+    if r in ("admin", "operator", "viewer"):
+        return None
+    conn = _get_conn()
+    try:
+        if r == "team_lead":
+            rows = conn.execute(
+                """
+                SELECT tm.mailbox_id FROM team_mailboxes tm
+                INNER JOIN teams t ON t.id = tm.team_id AND t.lead_user_id = ?
+                """,
+                (user_id,),
+            ).fetchall()
+            return frozenset(int(x["mailbox_id"]) for x in rows)
+        if r == "team_member":
+            rows = conn.execute(
+                "SELECT mailbox_id FROM user_mailboxes WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+            return frozenset(int(x["mailbox_id"]) for x in rows)
+    finally:
+        conn.close()
+    return frozenset()
+
+
+def rbac_lead_can_assign_mailbox(actor_id: int, mailbox_id: int) -> bool:
+    """组长仅能指派本组已绑定邮箱给组员。"""
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT 1 FROM team_mailboxes tm
+            INNER JOIN teams t ON t.id = tm.team_id AND t.lead_user_id = ?
+            WHERE tm.mailbox_id = ?
+            LIMIT 1
+            """,
+            (actor_id, mailbox_id),
+        ).fetchone()
+        return bool(row)
+    finally:
+        conn.close()
+
+
+def rbac_replace_member_mailboxes(user_id: int, mailbox_ids: list[int]) -> None:
+    """替换组员邮箱绑定；每个邮箱全局仅能绑定一个 user_mailboxes 行。"""
+    conn = _get_conn()
+    try:
+        conn.execute("DELETE FROM user_mailboxes WHERE user_id = ?", (user_id,))
+        for mid in sorted(set(mailbox_ids)):
+            conn.execute(
+                "INSERT OR REPLACE INTO user_mailboxes (user_id, mailbox_id) VALUES (?, ?)",
+                (user_id, int(mid)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def rbac_list_teams() -> list[dict]:
+    conn = _get_conn()
+    try:
+        teams = conn.execute("SELECT * FROM teams ORDER BY id").fetchall()
+        out = []
+        for t in teams:
+            d = dict(t)
+            mids = conn.execute(
+                "SELECT mailbox_id FROM team_mailboxes WHERE team_id = ? ORDER BY mailbox_id",
+                (d["id"],),
+            ).fetchall()
+            d["mailbox_ids"] = [int(r["mailbox_id"]) for r in mids]
+            out.append(d)
+        return out
+    finally:
+        conn.close()
+
+
+def rbac_create_team(*, name: str, lead_user_id: int) -> dict:
+    now = _now_iso()
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO teams (name, lead_user_id, created_at, updated_at) VALUES (?, ?, ?, ?)",
+            (name.strip(), lead_user_id, now, now),
+        )
+        tid = cur.lastrowid
+        conn.commit()
+        row = conn.execute("SELECT * FROM teams WHERE id = ?", (tid,)).fetchone()
+        d = dict(row) if row else {}
+        d["mailbox_ids"] = []
+        return d
+    finally:
+        conn.close()
+
+
+def rbac_update_team(team_id: int, *, name: str | None = None, lead_user_id: int | None = None) -> dict | None:
+    conn = _get_conn()
+    now = _now_iso()
+    try:
+        row = conn.execute("SELECT id FROM teams WHERE id = ?", (team_id,)).fetchone()
+        if not row:
+            return None
+        if name is not None:
+            conn.execute("UPDATE teams SET name = ?, updated_at = ? WHERE id = ?", (name.strip(), now, team_id))
+        if lead_user_id is not None:
+            conn.execute(
+                "UPDATE teams SET lead_user_id = ?, updated_at = ? WHERE id = ?",
+                (lead_user_id, now, team_id),
+            )
+        conn.commit()
+        row2 = conn.execute("SELECT * FROM teams WHERE id = ?", (team_id,)).fetchone()
+        if not row2:
+            return None
+        d = dict(row2)
+        mids = conn.execute(
+            "SELECT mailbox_id FROM team_mailboxes WHERE team_id = ? ORDER BY mailbox_id",
+            (team_id,),
+        ).fetchall()
+        d["mailbox_ids"] = [int(r["mailbox_id"]) for r in mids]
+        return d
+    finally:
+        conn.close()
+
+
+def rbac_delete_team(team_id: int) -> bool:
+    conn = _get_conn()
+    try:
+        cur = conn.execute("DELETE FROM teams WHERE id = ?", (team_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def rbac_set_team_mailboxes(team_id: int, mailbox_ids: list[int]) -> None:
+    conn = _get_conn()
+    try:
+        conn.execute("DELETE FROM team_mailboxes WHERE team_id = ?", (team_id,))
+        for mid in sorted(set(int(x) for x in mailbox_ids)):
+            conn.execute(
+                "INSERT OR IGNORE INTO team_mailboxes (team_id, mailbox_id) VALUES (?, ?)",
+                (team_id, mid),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def rbac_get_member_mailboxes(user_id: int) -> list[int]:
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT mailbox_id FROM user_mailboxes WHERE user_id = ? ORDER BY mailbox_id",
+            (user_id,),
+        ).fetchall()
+        return [int(r["mailbox_id"]) for r in rows]
+    finally:
+        conn.close()
+
+
+def auth_count_active_admins() -> int:
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT COUNT(1) AS c FROM users
+            WHERE role = 'admin' AND is_active = 1
+            """,
+        ).fetchone()
+        return int(row["c"]) if row else 0
+    finally:
+        conn.close()
+
+
+def auth_get_user_role(user_id: int) -> str | None:
+    conn = _get_conn()
+    try:
+        row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+        return str(row["role"]) if row else None
+    finally:
+        conn.close()
+
+
+def auth_count_users() -> int:
+    conn = _get_conn()
+    row = conn.execute("SELECT COUNT(1) AS c FROM users").fetchone()
+    conn.close()
+    return int(row["c"]) if row else 0
+
+
+def auth_create_user(*, username: str, password_hash: str, role: str) -> dict:
+    if role not in _VALID_ROLES:
+        raise ValueError("invalid role")
+    now = _now_iso()
+    conn = _get_conn()
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO users (username, password_hash, role, is_active, created_at, updated_at)
+            VALUES (?, ?, ?, 1, ?, ?)
+            """,
+            (username.strip().lower(), password_hash, role, now, now),
+        )
+        uid = cur.lastrowid
+        conn.commit()
+        row = conn.execute("SELECT id, username, role, is_active, created_at FROM users WHERE id = ?", (uid,)).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else {}
+
+
+def auth_get_user_by_username(username: str) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM users WHERE lower(username) = lower(?)",
+        (username.strip(),),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def auth_get_user_by_id(user_id: int) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def auth_list_users() -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT id, username, role, is_active, created_at, updated_at FROM users ORDER BY id"
+    ).fetchall()
+    conn.close()
+    return _dicts(rows)
+
+
+def auth_update_user(
+    user_id: int,
+    *,
+    password_hash: str | None = None,
+    role: str | None = None,
+    is_active: int | None = None,
+) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute("SELECT id FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not row:
+        conn.close()
+        return None
+    now = _now_iso()
+    if password_hash is not None:
+        conn.execute(
+            "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+            (password_hash, now, user_id),
+        )
+    if role is not None:
+        if role not in _VALID_ROLES:
+            conn.close()
+            raise ValueError("invalid role")
+        conn.execute("UPDATE users SET role = ?, updated_at = ? WHERE id = ?", (role, now, user_id))
+    if is_active is not None:
+        conn.execute(
+            "UPDATE users SET is_active = ?, updated_at = ? WHERE id = ?",
+            (1 if is_active else 0, now, user_id),
+        )
+    conn.commit()
+    row2 = conn.execute(
+        "SELECT id, username, role, is_active, created_at, updated_at FROM users WHERE id = ?",
+        (user_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row2) if row2 else None
+
+
+def auth_delete_user(user_id: int) -> bool:
+    conn = _get_conn()
+    cur = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
+
+
+def auth_purge_expired_sessions() -> int:
+    conn = _get_conn()
+    now = _now_iso()
+    cur = conn.execute("DELETE FROM user_sessions WHERE expires_at <= ?", (now,))
+    n = cur.rowcount
+    conn.commit()
+    conn.close()
+    return n
+
+
+def auth_create_session(user_id: int, token: str, expires_at: str) -> None:
+    conn = _get_conn()
+    conn.execute(
+        """
+        INSERT INTO user_sessions (token, user_id, created_at, expires_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (token, user_id, _now_iso(), expires_at),
+    )
+    conn.commit()
+    conn.close()
+
+
+def auth_delete_session(token: str) -> None:
+    conn = _get_conn()
+    conn.execute("DELETE FROM user_sessions WHERE token = ?", (token,))
+    conn.commit()
+    conn.close()
+
+
+def auth_delete_all_sessions_for_user(user_id: int) -> None:
+    conn = _get_conn()
+    conn.execute("DELETE FROM user_sessions WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def auth_get_session_user(token: str) -> dict | None:
+    """有效会话返回用户行 dict（含 password_hash 供校验流程外勿日志）。"""
+    conn = _get_conn()
+    now = _now_iso()
+    row = conn.execute(
+        """
+        SELECT u.* FROM users u
+        JOIN user_sessions s ON s.user_id = u.id
+        WHERE s.token = ? AND s.expires_at > ? AND u.is_active = 1
+        """,
+        (token, now),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 # ─── processed_messages ───────────────────────────────────────────────────────
@@ -535,7 +993,40 @@ def list_processed_messages(limit: int = 100, mailbox_id: int | None = None) -> 
     return _dicts(rows)
 
 
-# ─── creators ─────────────────────────────────────────────────────────────────
+def list_processed_messages_for_mailboxes(limit: int, mailbox_ids: list[int]) -> list[dict]:
+    if not mailbox_ids:
+        return []
+    conn = _get_conn()
+    ph = ",".join("?" * len(mailbox_ids))
+    mids = tuple(int(x) for x in mailbox_ids)
+    params = mids + (limit,)
+    rows = conn.execute(
+        f"""
+        SELECT
+            pm.mailbox_id,
+            pm.message_id,
+            pm.thread_id,
+            pm.processed_at,
+            kt.kol_email,
+            kt.kol_name,
+            kt.intent_label,
+            IFNULL(mb.label, '') AS mailbox_label,
+            IFNULL(mb.email_address, '') AS mailbox_email,
+            tm.subject,
+            SUBSTR(tm.body, 1, 160) AS body_excerpt
+        FROM processed_messages pm
+        LEFT JOIN mailboxes mb ON pm.mailbox_id = mb.id
+        LEFT JOIN kol_threads kt ON pm.thread_id = kt.thread_id
+        LEFT JOIN thread_messages tm
+            ON tm.thread_id = pm.thread_id AND tm.message_id = pm.message_id AND tm.role = 'kol'
+        WHERE pm.mailbox_id IN ({ph})
+        ORDER BY pm.processed_at DESC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+    conn.close()
+    return _dicts(rows)
 
 def list_creators() -> list[dict]:
     conn = _get_conn()
@@ -1227,6 +1718,37 @@ def list_escalation_events(limit: int = 100) -> list[dict]:
     return _dicts(rows)
 
 
+def list_escalation_events_for_mailboxes(limit: int, mailbox_ids: list[int]) -> list[dict]:
+    if not mailbox_ids:
+        return []
+    conn = _get_conn()
+    ph = ",".join("?" * len(mailbox_ids))
+    mids = tuple(int(x) for x in mailbox_ids)
+    rows = conn.execute(
+        f"""
+        SELECT ee.*,
+               c.email AS creator_email, c.name AS creator_name,
+               p.name AS product_name
+        FROM escalation_events ee
+        LEFT JOIN creators c ON ee.creator_id = c.id
+        LEFT JOIN products p ON ee.product_id = p.id
+        INNER JOIN kol_threads kt ON kt.thread_id = ee.thread_id AND kt.mailbox_id IN ({ph})
+        ORDER BY ee.created_at DESC
+        LIMIT ?
+        """,
+        mids + (limit,),
+    ).fetchall()
+    conn.close()
+    return _dicts(rows)
+
+
+def get_escalation_event(escalation_id: int) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM escalation_events WHERE id = ?", (escalation_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def get_last_escalation_time(thread_id: str) -> str | None:
     """返回该线程最近一次升级的 sent_at ISO 字符串，若无则返回 None。"""
     conn = _get_conn()
@@ -1286,6 +1808,34 @@ def list_intent_results(limit: int = 100) -> list[dict]:
     ).fetchall()
     conn.close()
     return _dicts(rows)
+
+
+def list_intent_results_for_mailboxes(limit: int, mailbox_ids: list[int]) -> list[dict]:
+    if not mailbox_ids:
+        return []
+    conn = _get_conn()
+    ph = ",".join("?" * len(mailbox_ids))
+    mids = tuple(int(x) for x in mailbox_ids)
+    rows = conn.execute(
+        f"""
+        SELECT ir.*, c.email AS creator_email, c.name AS creator_name
+        FROM intent_results ir
+        LEFT JOIN creators c ON ir.creator_id = c.id
+        INNER JOIN kol_threads kt ON kt.thread_id = ir.thread_id AND kt.mailbox_id IN ({ph})
+        ORDER BY ir.created_at DESC, ir.id DESC
+        LIMIT ?
+        """,
+        mids + (limit,),
+    ).fetchall()
+    conn.close()
+    return _dicts(rows)
+
+
+def get_intent_result(intent_id: int) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute("SELECT * FROM intent_results WHERE id = ?", (intent_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 
@@ -1438,6 +1988,25 @@ def list_all_threads(mailbox_id: int | None = None) -> list[dict]:
             ORDER BY kt.updated_at DESC
             """
         ).fetchall()
+    conn.close()
+    return _dicts(rows)
+
+
+def list_all_threads_mailboxes(mailbox_ids: list[int]) -> list[dict]:
+    if not mailbox_ids:
+        return []
+    conn = _get_conn()
+    ph = ",".join("?" * len(mailbox_ids))
+    rows = conn.execute(
+        f"""
+        SELECT kt.*, mb.label AS mailbox_label, mb.email_address AS mailbox_email
+        FROM kol_threads kt
+        LEFT JOIN mailboxes mb ON kt.mailbox_id = mb.id
+        WHERE kt.mailbox_id IN ({ph})
+        ORDER BY kt.updated_at DESC
+        """,
+        tuple(int(x) for x in mailbox_ids),
+    ).fetchall()
     conn.close()
     return _dicts(rows)
 

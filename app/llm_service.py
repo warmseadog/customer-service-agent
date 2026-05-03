@@ -74,7 +74,8 @@ def call_llm(
                          LLM_MODEL=google/gemini-3.1-pro-preview（或其它 OpenRouter slug）
       - OpenAI GPT-4o:   LLM_BASE_URL=https://api.openai.com/v1
       - 通义千问 Plus:   LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-      - DeepSeek:        LLM_BASE_URL=https://api.deepseek.com/v1
+      - DeepSeek 官网:   LLM_BASE_URL=https://api.deepseek.com
+                         LLM_MODEL=deepseek-v4-pro 或 deepseek-v4-flash（见官方文档）
       - 本地 Ollama:     LLM_BASE_URL=http://localhost:11434/v1
 
     使用 OpenRouter 时可在 .env 中设置 LLM_HTTP_REFERER、LLM_APP_TITLE（对应 HTTP-Referer /
@@ -83,8 +84,8 @@ def call_llm(
     api_key = (config.LLM_API_KEY or "").strip()
     if not api_key:
         raise ValueError(
-            "LLM_API_KEY 为空：请在项目根目录 .env 中设置 LLM_API_KEY=sk-or-v1-…，保存后重启进程。"
-            "（仅改编辑器未保存到磁盘时，运行中的 python 读不到密钥，OpenRouter 会报 401 Missing Authentication。）"
+            "LLM_API_KEY 为空：请在项目根目录 .env 中设置 LLM_API_KEY，保存后重启进程。"
+            "（若已填写：确认文件已保存，且运行中的进程已重启。）"
         )
     url = f"{config.LLM_BASE_URL.rstrip('/')}/chat/completions"
     headers = {

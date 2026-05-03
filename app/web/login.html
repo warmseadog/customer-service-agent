@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 · 客服邮件工作台</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;background:#0f172a;color:#e2e8f0;padding:24px}
+.card{width:100%;max-width:400px;background:#111827;border:1px solid #1f2937;border-radius:16px;padding:28px}
+h1{font-size:1.35rem;margin:0 0 8px}
+p{margin:0 0 20px;color:#94a3b8;font-size:14px;line-height:1.5}
+label{display:block;font-size:12px;color:#94a3b8;margin-bottom:6px}
+input{width:100%;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:15px}
+button{width:100%;background:#6366f1;color:#fff;border:none;border-radius:10px;padding:12px 16px;font-weight:600;font-size:15px;cursor:pointer}
+button:hover{filter:brightness(1.1)}
+button:disabled{opacity:0.65;cursor:not-allowed}
+.err{display:none;margin-top:12px;padding:10px 12px;border-radius:8px;background:#450a0a;color:#fca5a5;font-size:13px}
+.err.show{display:block}
+.muted{margin-top:16px;font-size:12px;color:#64748b;line-height:1.45}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>客服邮件工作台</h1>
+  <p>请使用管理员或运营账号登录；观众账号仅可浏览。</p>
+  <form id="f">
+    <label for="u">用户名</label>
+    <input id="u" name="username" autocomplete="username" required>
+    <label for="p">密码</label>
+    <input id="p" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit" id="go">登录</button>
+  </form>
+  <div id="err" class="err"></div>
+  <p class="muted">生产环境请通过 HTTPS 访问，并在 .env 中设置 <code>AUTH_COOKIE_SECURE=true</code>（由反向代理注入 <code>X-Forwarded-Proto: https</code>）。</p>
+</div>
+<script>
+(function(){
+  const form=document.getElementById('f');
+  const err=document.getElementById('err');
+  const go=document.getElementById('go');
+  function showErr(t){
+      err.textContent=t||'';
+      err.className='err'+(t?' show':'');
+  }
+  form.addEventListener('submit',async function(ev){
+    ev.preventDefault();
+    showErr('');
+    const username=document.getElementById('u').value.trim();
+    const password=document.getElementById('p').value;
+    go.disabled=true;
+    go.textContent='登录中…';
+    try{
+      const res=await fetch('/auth/login',{
+        method:'POST',
+        credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({username,password}),
+      });
+      if(!res.ok){
+        let msg='登录失败';
+        try{
+          const j=await res.json();
+          if(j.detail){
+            msg=typeof j.detail==='string'?j.detail:(Array.isArray(j.detail)?j.detail.map(d=>d.msg||d).join('; '):'登录失败');
+          }
+        }catch(e){if(res.status===401)msg='用户名或密码错误';}
+        showErr(msg);
+        return;
+      }
+      window.location.replace('/dashboard');
+    }catch(e){
+      showErr('网络错误，请稍后重试');
+    }finally{
+      go.disabled=false;
+      go.textContent='登录';
+    }
+  });
+})();
+</script>
+</body>
+</html>

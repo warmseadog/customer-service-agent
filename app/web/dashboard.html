@@ -58,6 +58,9 @@ textarea{min-height:90px;resize:vertical}
 .thread-detail-panel{margin-top:12px;padding-top:12px;border-top:1px solid #1f2937;display:none}
 .thread-detail-panel.is-open{display:block}
 .msg-row{margin-bottom:12px;max-width:100%}
+body.viewer-role .need-op{display:none!important}
+body:not(.admin-role) .need-admin{display:none!important}
+body:not(.super-admin) .need-super-admin{display:none!important}
 .msg-row .msg-meta{font-size:11px;color:#94a3b8;margin-bottom:6px}
 .msg-row .msg-body{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.55;border-radius:10px;padding:10px 12px}
 .msg-them .msg-body{background:#0f172a;border:1px solid #334155}
@@ -97,6 +100,13 @@ textarea{min-height:90px;resize:vertical}
 .mailbox-search-panel input{margin-bottom:0}
 .product-mailbox-toolbar{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px;margin-bottom:4px;border-bottom:1px solid #1f2937;padding-bottom:1px}
 .subtabs-inner{flex:1;min-width:160px;display:flex;flex-wrap:wrap;gap:2px;align-items:flex-end}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-overlay[hidden]{display:none!important}
+.modal-box{max-width:520px;width:100%;max-height:88vh;display:flex;flex-direction:column;background:#111827;border:1px solid #1f2937;border-radius:16px;padding:16px;box-shadow:0 25px 50px rgba(0,0,0,0.45)}
+.modal-box h3{margin-bottom:6px}
+.team-mb-check-scroll{overflow:auto;max-height:min(380px,52vh);margin:10px 0;padding:10px 12px;background:#020617;border-radius:10px;border:1px solid #334155}
+.team-mb-check-scroll label{display:block;margin-bottom:8px;font-size:13px;color:#e2e8f0;cursor:pointer}
+#team-mb-filter{margin-bottom:0}
 </style>
 </head>
 <body>
@@ -107,15 +117,19 @@ textarea{min-height:90px;resize:vertical}
       <p class="brand-kicker"><span class="brand-cn">拓基时代</span><span class="brand-en">TUOJISHIDAI</span></p>
       <div class="hero-body">
         <h1>客服邮件工作台</h1>
-        <p>进程<strong>启动后默认开启收件轮询</strong>，仅在点击「停止轮询」或<strong>关闭进程</strong>后停止；可在「邮箱账户」绑定多台站点邮箱（阿里云企业邮、Gmail、Outlook、Yahoo、163 等，按需填写 IMAP/SMTP）。全局 <strong>兜底收件人</strong> 与<strong>可分配负责人名单</strong>请在「内部客服」页配置。系统仅被动接收入站邮件。</p>
+        <p>进程<strong>默认不自动收信</strong>，请在准备好邮箱与模型配置后点击「<strong>启动轮询</strong>」；点击「停止轮询」或<strong>关闭进程</strong>后停止。可在「邮箱账户」绑定多台站点邮箱（阿里云企业邮、Gmail、Outlook、Yahoo、163 等，按需填写 IMAP/SMTP）。全局 <strong>兜底收件人</strong> 与<strong>可分配负责人名单</strong>请在「内部客服」页配置。系统仅被动接收入站邮件。</p>
       </div>
     </div>
     <div class="controls">
-      <button class="success" onclick="api('POST','/start-auto',null,this)">启动轮询</button>
-      <button class="danger" onclick="api('POST','/stop-auto',null,this)">停止轮询</button>
-      <button class="warn" onclick="api('POST','/check',null,this)">立即检查来信</button>
+      <button class="success need-op" onclick="api('POST','/start-auto',null,this)">启动轮询</button>
+      <button class="danger need-op" onclick="api('POST','/stop-auto',null,this)">停止轮询</button>
+      <button class="warn need-op" onclick="api('POST','/check',null,this)">立即检查来信</button>
       <button class="secondary" onclick="handleRefresh(this)">刷新数据</button>
     </div>
+  </div>
+  <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin:0 0 14px;flex-wrap:wrap">
+    <span id="auth-user" class="muted small"></span>
+    <button type="button" class="secondary small" onclick="logoutDash()">退出登录</button>
   </div>
 
   <div class="cards">
@@ -134,6 +148,8 @@ textarea{min-height:90px;resize:vertical}
     <button class="tab" onclick="switchTab('products',this)">产品库</button>
     <button class="tab" onclick="switchTab('internal',this)">内部客服</button>
     <button class="tab" onclick="switchTab('mailboxes',this)">邮箱账户</button>
+    <button type="button" class="tab need-admin" onclick="switchTab('accounts',this)">账号管理</button>
+    <button type="button" class="tab need-super-admin" onclick="switchTab('teams',this)">小组与邮箱</button>
     <button class="tab" onclick="switchTab('logs',this)">运行日志</button>
   </div>
 
@@ -161,7 +177,7 @@ textarea{min-height:90px;resize:vertical}
               </div>
             </div>
           </div>
-          <button class="danger small" onclick="deleteAllThreads()">清空全部会话</button>
+          <button class="danger small need-op" onclick="deleteAllThreads()">清空全部会话</button>
         </div>
         <div id="thread-list" class="list"><div class="empty">加载中...</div></div>
       </div>
@@ -177,7 +193,7 @@ textarea{min-height:90px;resize:vertical}
     <div class="box">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <h3>已发内部通知</h3>
-        <button class="danger small" onclick="deleteAllEscalations()">清空本列表</button>
+        <button class="danger small need-op" onclick="deleteAllEscalations()">清空本列表</button>
       </div>
       <div class="muted" style="margin-bottom:12px">需要人工跟进来信时，系统会按规则给产品负责人/兜底收件人发<strong>内部说明邮件</strong>；本页即这些邮件的留痕（便于对账、排障，不代表已在客户侧展示）。</div>
       <div class="table-wrap">
@@ -194,7 +210,7 @@ textarea{min-height:90px;resize:vertical}
     <div class="box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h3>客诉分析记录</h3>
-        <button class="danger small" onclick="deleteAllIntents()">清空记录</button>
+        <button class="danger small need-op" onclick="deleteAllIntents()">清空记录</button>
       </div>
       <div class="table-wrap">
         <table class="tbl">
@@ -250,7 +266,7 @@ textarea{min-height:90px;resize:vertical}
           <input type="search" id="product-form-mailbox-search" placeholder="输入关键词筛选下方复选框…" autocomplete="off" oninput="onProductFormMailboxSearchInput()">
         </div>
         <div id="product-mailbox-checks" class="muted small" style="margin-bottom:12px;line-height:1.5">加载邮箱列表…</div>
-        <button onclick="saveProduct()">保存产品</button>
+        <button class="need-op" onclick="saveProduct()">保存产品</button>
       </div>
       <div class="box">
         <h3>说明</h3>
@@ -281,7 +297,7 @@ textarea{min-height:90px;resize:vertical}
           <h3 style="margin:0">产品列表</h3>
           <input type="text" id="product-search" placeholder="搜索 ID / 品牌 / 名称 / 负责人..." style="max-width:280px;margin:0;padding:6px 12px;font-size:13px;border-radius:8px;" oninput="filterProducts()">
         </div>
-        <button class="danger small" onclick="deleteAllProducts()">清空全部产品</button>
+        <button class="danger small need-op" onclick="deleteAllProducts()">清空全部产品</button>
       </div>
       <div class="table-wrap">
         <table class="tbl">
@@ -303,7 +319,7 @@ textarea{min-height:90px;resize:vertical}
         <div><label>姓名 *</label><input id="staff-new-name" placeholder="如：张三" autocomplete="off"></div>
         <div><label>内部邮箱 *</label><input id="staff-new-email" type="email" placeholder="zhangsan@company.com" autocomplete="off"></div>
       </div>
-      <div style="margin-top:10px"><button type="button" onclick="addSupportStaff()">添加到名单</button></div>
+      <div style="margin-top:10px"><button type="button" class="need-op" onclick="addSupportStaff()">添加到名单</button></div>
       <div class="table-wrap" style="margin-top:16px">
         <table class="tbl">
           <thead><tr><th>姓名</th><th>内部邮箱</th><th>操作</th></tr></thead>
@@ -314,7 +330,7 @@ textarea{min-height:90px;resize:vertical}
     <div class="box esc-settings-card" id="esc-escalation-box" style="margin-top:16px">
       <div id="esc-minimal-collapsed" class="esc-minimal-collapsed">
         <span class="esc-minimal-label">全局收件人</span>
-        <button type="button" class="secondary small" onclick="openEscalationEditor()">设置</button>
+        <button type="button" class="secondary small need-op" onclick="openEscalationEditor()">设置</button>
       </div>
       <div id="esc-full-panel" class="esc-full-panel" hidden>
         <h3>内部通知：全局兜底收件人</h3>
@@ -341,8 +357,8 @@ textarea{min-height:90px;resize:vertical}
           </div>
           <p class="muted" id="esc-env-hint" style="margin-bottom:0;margin-top:8px"></p>
           <div class="esc-edit-actions">
-            <button type="button" onclick="saveEscalationSettings()">保存</button>
-            <button type="button" class="secondary" onclick="closeEscalationEditor()">收起</button>
+            <button type="button" class="need-op" onclick="saveEscalationSettings()">保存</button>
+            <button type="button" class="secondary need-op" onclick="closeEscalationEditor()">收起</button>
           </div>
         </div>
       </div>
@@ -377,13 +393,13 @@ textarea{min-height:90px;resize:vertical}
             <p class="muted" style="margin:6px 0 0;font-size:12px">保存后轮询将按「已启用」账户依次拉取未读。编辑时密码留空表示不改密码。</p>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'aliyun\')">阿里企业邮</button>
-            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'gmail\')">Gmail</button>
-            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'outlook\')">Outlook/Hotmail</button>
-            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'outlook365\')">Microsoft 365</button>
-            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'yahoo\')">Yahoo</button>
-            <button type="button" class="secondary small" onclick="fillMailboxTemplate(\'163\')">网易 163</button>
-            <button type="button" class="secondary small" onclick="clearMailboxForm()">清空表单</button>
+            <button type="button" class="secondary small need-op" onclick="fillMailboxTemplate(\'aliyun\')">阿里企业邮</button>
+            <button type="button" class="secondary small need-op" onclick="fillMailboxTemplate(\'gmail\')">Gmail</button>
+            <button type="button" class="secondary small need-op" onclick="fillMailboxTemplate(\'outlook\')">Outlook/Hotmail</button>
+            <button type="button" class="secondary small need-op" onclick="fillMailboxTemplate(\'outlook365\')">Microsoft 365</button>
+            <button type="button" class="secondary small need-op" onclick="fillMailboxTemplate(\'yahoo\')">Yahoo</button>
+            <button type="button" class="secondary small need-op" onclick="fillMailboxTemplate(\'163\')">网易 163</button>
+            <button type="button" class="secondary small need-op" onclick="clearMailboxForm()">清空表单</button>
           </div>
           <p class="muted" style="margin:0 0 12px;font-size:11px;line-height:1.45">多数服务商需在邮箱设置里开启 IMAP/SMTP；Gmail/Yahoo/M365 常使用<strong>应用专用密码</strong>而非账号登录密码。SMTP 端口 <strong>587</strong> 时请<strong>取消勾选「SMTP 使用 SSL」</strong>（走 STARTTLS）。</p>
         </div>
@@ -421,7 +437,7 @@ textarea{min-height:90px;resize:vertical}
         </div>
         <label>品牌签名</label>
         <input id="mb-brand-sig" placeholder="结尾署名">
-        <button type="button" onclick="saveMailboxForm()">保存</button>
+        <button type="button" class="need-op" onclick="saveMailboxForm()">保存</button>
       </div>
       <div class="box">
         <h3>已配置账户</h3>
@@ -436,13 +452,106 @@ textarea{min-height:90px;resize:vertical}
     </div>
   </section>
 
+  <section id="tab-accounts" class="panel need-admin">
+    <div class="box">
+      <h3 style="margin-bottom:8px">登录账号</h3>
+      <p class="muted" style="margin:0 0 16px;font-size:12px"><strong>超级管理员</strong>：全权（含小组与管辖邮箱、高危批量）。<strong>业务专员</strong>：与组长类似的改写权限，但可见<strong>全站各邮箱</strong>数据、不按邮箱收窄。<strong>组长</strong>：仅本组管辖邮箱范围内业务与账号（可为组员派邮箱）。<strong>组员</strong>：只读、仅已绑定邮箱。<strong>观摩</strong>：只读、可看全站。超级管理员与组长/业务专员可进本页管账号；仅超级管理员可进「小组与邮箱」。</p>
+      <div class="two-col" style="max-width:720px;margin-bottom:20px">
+        <div>
+          <label>新用户名</label>
+          <input id="admin-new-user" autocomplete="off" placeholder="登录名">
+        </div>
+        <div>
+          <label>初始密码</label>
+          <input id="admin-new-pass" type="password" autocomplete="new-password" placeholder="至少设强密码">
+        </div>
+        <div>
+          <label>角色</label>
+          <select id="admin-new-role" onchange="toggleNewMemberMailboxes()"></select>
+        </div>
+        <div style="grid-column:1/-1" id="admin-new-member-mailbox-wrap" class="muted small" hidden>
+          <label style="margin-bottom:6px;display:block">新建组员时勾选的负责邮箱（每邮箱全局仅绑定一人）</label>
+          <div id="admin-new-member-mailbox-checks" style="max-height:160px;overflow:auto;border:1px solid #334155;border-radius:8px;padding:10px"></div>
+        </div>
+        <div style="display:flex;align-items:flex-end;padding-bottom:12px">
+          <button type="button" class="success" onclick="submitNewAdminUser()">添加用户</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>负责邮箱</th><th>状态</th><th>创建时间</th><th>新密码</th><th>操作</th></tr></thead>
+          <tbody id="admin-user-rows"><tr><td colspan="8" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-teams" class="panel need-super-admin">
+    <div class="box">
+      <h3 style="margin-bottom:8px">小组与管辖邮箱</h3>
+      <p class="muted" style="margin:0 0 16px;font-size:12px"><strong>本页做两件事：</strong>定小组（名称 + 组长账号）+ 勾选本组<strong>管辖邮箱池</strong>。谁当<strong>组员</strong>、组员绑定哪几个邮箱，在「账号管理」里把角色设为<strong>组员</strong>并勾选邮箱（组长也可在已管辖范围内帮组员改绑定）。同一物理邮箱同时只属于一个小组、至多绑定一名组员。</p>
+      <div class="two-col" style="max-width:640px;margin-bottom:16px">
+        <div>
+          <label>小组名称</label>
+          <input id="team-new-name" placeholder="例如 华东组">
+        </div>
+        <div>
+          <label>组长账号</label>
+          <select id="team-new-lead" style="margin-bottom:4px">
+            <option value="">请选择…</option>
+          </select>
+          <p class="muted small" style="margin:0 0 8px">下列列表优先排<strong>组长</strong>角色；若选了其他角色，请随后在「账号管理」改为组长。</p>
+        </div>
+        <div style="display:flex;align-items:flex-end;padding-bottom:12px">
+          <button type="button" class="success" onclick="submitNewTeam()">新建小组</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="tbl">
+          <thead><tr><th>ID</th><th>名称</th><th>组长</th><th>管辖邮箱</th><th>操作</th></tr></thead>
+          <tbody id="teams-rows"><tr><td colspan="5" class="empty">加载中…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <div id="team-mailbox-modal" class="modal-overlay" hidden onclick="if(event.target===this)closeTeamMailboxModal()">
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="team-mb-modal-title" onclick="event.stopPropagation()">
+      <h3 id="team-mb-modal-title">编辑小组管辖邮箱</h3>
+      <p class="muted small" style="margin:0 0 10px">勾选归入本组的邮箱；组长只能在这些邮箱范围内操作数据并为组员指派。</p>
+      <label class="muted small" for="team-mb-filter" style="margin-bottom:6px">筛选（名称、邮箱、ID）</label>
+      <input type="search" id="team-mb-filter" placeholder="输入关键词…" autocomplete="off" oninput="applyTeamMbModalFilter()">
+      <div id="team-mb-checks" class="team-mb-check-scroll"></div>
+      <p class="muted small" style="margin:0">未勾选任何邮箱则本组暂无数据范围（组长列表会为空）。</p>
+      <div class="esc-edit-actions" style="margin-top:14px">
+        <button type="button" class="secondary" onclick="closeTeamMailboxModal()">取消</button>
+        <button type="button" class="success" onclick="saveTeamMailboxModal()">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="member-mailbox-modal" class="modal-overlay" hidden onclick="if(event.target===this)closeMemberMailboxModal()">
+    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="member-mb-modal-title" onclick="event.stopPropagation()">
+      <h3 id="member-mb-modal-title">绑定组员负责邮箱</h3>
+      <p class="muted small" style="margin:0 0 10px">勾选该组员要处理的收件箱；须归属某小组的管辖范围（组长登录时下列表已自动限定为本组邮箱）。每个邮箱全局最多绑定一名组员。</p>
+      <label class="muted small" for="member-mb-filter" style="margin-bottom:6px">筛选（名称、邮箱、ID）</label>
+      <input type="search" id="member-mb-filter" placeholder="输入关键词…" autocomplete="off" oninput="applyMemberMbModalFilter()">
+      <div id="member-mb-checks" class="team-mb-check-scroll"></div>
+      <p class="muted small" style="margin:0">取消全选并保存可清空该组员绑定。</p>
+      <div class="esc-edit-actions" style="margin-top:14px">
+        <button type="button" class="secondary" onclick="closeMemberMailboxModal()">取消</button>
+        <button type="button" class="success" onclick="saveMemberMailboxModal()">保存</button>
+      </div>
+    </div>
+  </div>
+
   <section id="tab-logs" class="panel">
     <div class="box">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <h3>运行日志</h3>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <span class="muted small">仅内存、重启后清空</span>
-          <button class="secondary small" onclick="clearRunLogs()">清空当前日志</button>
+          <button class="secondary small need-op" onclick="clearRunLogs()">清空当前日志</button>
         </div>
       </div>
       <div id="log-list" class="list"><div class="empty">加载中...</div></div>
@@ -454,14 +563,53 @@ textarea{min-height:90px;resize:vertical}
 <script>
 function esc(v){const div=document.createElement('div');div.textContent=v==null?'':String(v);return div.innerHTML;}
 function escAttr(v){if(v==null||v==='')return'';return String(v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+/** 与后端/Payload 一致英文 value；界面只展示中文说明 */
+const ROLE_UI_ORDER=['viewer','team_member','team_lead','operator','admin'];
+const ROLE_LABEL_SHORT={
+  admin:'超级管理员',
+  operator:'业务专员',
+  team_lead:'组长',
+  team_member:'组员',
+  viewer:'观摩',
+};
+const ROLE_LABEL_LONG={
+  admin:'超级管理员 · 系统配置、小组与高危操作',
+  operator:'业务专员 · 全站各邮箱可处理（不按邮箱限范围）',
+  team_lead:'组长 · 本组管辖邮箱与组员',
+  team_member:'组员 · 仅已绑定邮箱（只读）',
+  viewer:'观摩 · 全站只读',
+};
+function roleLabelShort(code){return ROLE_LABEL_SHORT[String(code||'')]||String(code||'—');}
+function roleLabelLong(code){return ROLE_LABEL_LONG[String(code||'')]||String(code||'—');}
+function htmlRoleSelectOptions(selected){
+  const cur=selected!==undefined&&selected!==null&&selected!==''?String(selected):'viewer';
+  return ROLE_UI_ORDER.map(v=>'<option value="'+escAttr(v)+'"'+(cur===v?' selected':'')+'>'+esc(roleLabelLong(v))+'</option>').join('');
+}
 function showBanner(text,ok=false){const el=document.getElementById('banner');el.textContent=text;el.className='banner show'+(ok?' ok':'');}
 function clearBanner(){const el=document.getElementById('banner');el.className='banner';el.textContent='';}
+function redirectToLoginIfForbidden(){
+  const p=window.location.pathname||'';
+  if(p==='/login'||p.endsWith('/login'))return;
+  window.location.replace('/login');
+}
 async function fetchJson(url,opts={}){
-  const res=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});
+  const headers={'Content-Type':'application/json',...(opts.headers||{})};
+  const res=await fetch(url,{credentials:'include',...opts,headers});
+  if(res.status===401||res.status===403){
+    redirectToLoginIfForbidden();
+    const txt=await res.text();
+    throw new Error((txt&&txt.slice(0,120))||('HTTP '+res.status));
+  }
   if(!res.ok){const txt=await res.text();throw new Error(txt.slice(0,240)||('HTTP '+res.status));}
   const ct=res.headers.get('content-type')||'';
   if(!ct.includes('json')) return {};
   return res.json();
+}
+async function logoutDash(){
+  try{
+    await fetch('/auth/logout',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'}});
+  }catch(_e){}
+  window.location.replace('/login');
 }
 async function api(method,url,body,btn=null){
   let oldText='';
@@ -689,8 +837,8 @@ function renderProductTableRows(){
     <td class="muted small">${esc(p.owner_email||'—')}</td>
     <td class="small">${esc((p.keywords||[]).slice(0,4).join(', '))}</td>
     <td>
-      <button class="secondary small" onclick='prefillProduct(${JSON.stringify(p)})'>编辑</button>
-      <button class="danger small" onclick='deleteProduct(${JSON.stringify(p.id)})'>删除</button>
+      <button class="secondary small need-op" onclick='prefillProduct(${JSON.stringify(p)})'>编辑</button>
+      <button class="danger small need-op" onclick='deleteProduct(${JSON.stringify(p.id)})'>删除</button>
     </td>
   </tr>`;
   }).join('');
@@ -727,7 +875,7 @@ async function loadMailboxAccounts(){
           const lc=(m.last_checked_at||'').slice(0,16);
           const err=(m.last_error||'').trim();
           const st=err?('<span class="muted" style="color:#fca5a5">'+esc(err.slice(0,80))+'</span>'):(lc||'—');
-          return '<tr><td class="muted">'+m.id+'</td><td><strong>'+esc(m.label||'')+'</strong><div class="muted small">'+esc(m.email_address||'')+'</div></td><td class="muted small">'+esc(m.imap_host||'')+':'+esc(String(m.imap_port||''))+'</td><td>'+chk+'</td><td class="small">'+esc(lc||'')+(lc?'<br>':'')+st+'</td><td><button type="button" class="secondary small" onclick="editMailboxRow('+m.id+')">编辑</button> <button type="button" class="secondary small" onclick="testMailboxRow('+m.id+',this)">测试</button> <button type="button" class="danger small" onclick="deleteMailboxRow('+m.id+')">删除</button></td></tr>';
+          return '<tr><td class="muted">'+m.id+'</td><td><strong>'+esc(m.label||'')+'</strong><div class="muted small">'+esc(m.email_address||'')+'</div></td><td class="muted small">'+esc(m.imap_host||'')+':'+esc(String(m.imap_port||''))+'</td><td>'+chk+'</td><td class="small">'+esc(lc||'')+(lc?'<br>':'')+st+'</td><td><button type="button" class="secondary small need-op" onclick="editMailboxRow('+m.id+')">编辑</button> <button type="button" class="secondary small need-op" onclick="testMailboxRow('+m.id+',this)">测试</button> <button type="button" class="danger small need-op" onclick="deleteMailboxRow('+m.id+')">删除</button></td></tr>';
         }).join('');
       }
     }
@@ -736,6 +884,8 @@ async function loadMailboxAccounts(){
     updateProductSubtabsHint();
     if(window._allProducts!==undefined) renderProductTableRows();
     renderProductMailboxChecks();
+    rebuildAdminNewMemberMailboxChecks();
+    toggleNewMemberMailboxes();
   }catch(err){console.error(err);}
 }
 function fillMailboxTemplate(kind){
@@ -893,6 +1043,7 @@ function switchTab(name,btn){
   document.querySelectorAll('.tab').forEach(el=>el.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   btn.classList.add('active');
+  if(name==='teams') populateTeamLeadSelect();
 }
 function splitList(text){
   return String(text||'').split(',').map(v=>v.trim()).filter(Boolean);
@@ -919,6 +1070,10 @@ async function loadStatus(){
 
 async function loadInbox(){
   const mf=document.getElementById('mailbox-filter');
+  if(mf && !window._memberMailboxLocked && window._currentUser && window._currentUser.role==='team_member' && (window._authMailboxIds||[]).length===1){
+    window._memberMailboxLocked=true;
+    mf.value=String(window._authMailboxIds[0]);
+  }
   const mb=mf&&mf.value?String(mf.value).trim():'';
   const qs=mb?('?mailbox_id='+encodeURIComponent(mb)):'';
   const [threadsData, intentsData] = await Promise.all([
@@ -945,7 +1100,7 @@ async function loadInbox(){
           </div>
           <div class="draft-actions" style="margin-top:0">
             <button type="button" class="secondary small thread-toggle-btn" data-tid="${encodeURIComponent(row.thread_id)}" onclick="toggleThread(this)">查看来信</button>
-            <button type="button" class="danger small" onclick="deleteOneThreadFromBtn(this)">删除会话</button>
+            <button type="button" class="danger small need-op" onclick="deleteOneThreadFromBtn(this)">删除会话</button>
           </div>
         </div>
         <div class="muted" style="margin-top:4px">${esc(row.notes||'')}</div>
@@ -971,7 +1126,7 @@ async function loadInbox(){
             <span class="pill ${esc(row.cs_sentiment||'neutral')}">${esc(row.cs_sentiment||'neutral')}</span>
             <span class="pill ${esc(row.cs_tone||'cooperative')}">${esc(row.cs_tone||'cooperative')}</span>
             ${row.escalated?'<span class="pill escalated">已转内部</span>':''}
-            <button class="danger small" title="删除本条流水" onclick='deleteOneIntent(${row.id})'>删除</button>
+            <button class="danger small need-op" title="删除本条流水" onclick='deleteOneIntent(${row.id})'>删除</button>
           </div>
         </div>
       </div>
@@ -1063,7 +1218,7 @@ async function loadEscalations(){
     <td>${esc(row.product_name||'未绑定')}</td>
     <td class="small">${esc(row.reason||'')}</td>
     <td class="muted small">${esc(row.internal_email_to||'')}</td>
-    <td><button class="danger small" onclick="deleteOneEscalation(${row.id})">删除</button></td>
+    <td><button class="danger small need-op" onclick="deleteOneEscalation(${row.id})">删除</button></td>
   </tr>`).join('');
 }
 
@@ -1079,7 +1234,7 @@ async function loadIntents(){
     <td><span class="pill ${esc(row.cs_tone||'cooperative')}">${esc(row.cs_tone||'cooperative')}</span></td>
     <td>${row.escalated?'<span class="pill escalated">是</span>':'<span class="pill not-escalated">否</span>'}</td>
     <td class="small muted">${esc(row.summary||'')}</td>
-    <td><button class="danger small" onclick="deleteOneIntent(${row.id})">删除</button></td>
+    <td><button class="danger small need-op" onclick="deleteOneIntent(${row.id})">删除</button></td>
   </tr>`).join('');
 }
 
@@ -1113,7 +1268,7 @@ async function loadSupportStaff(){
   else{tbody.innerHTML=staff.map(s=>`<tr>
     <td>${esc(s.display_name)}</td>
     <td class="muted small">${esc(s.email)}</td>
-    <td><button type="button" class="danger small" onclick="deleteSupportStaff(${s.id})">删除</button></td>
+    <td><button type="button" class="danger small need-op" onclick="deleteSupportStaff(${s.id})">删除</button></td>
   </tr>`).join('');}
   fillProductOwnerSelect(staff);
 }
@@ -1351,18 +1506,334 @@ async function saveEscalationSettings(){
   }
 }
 
+function toggleNewMemberMailboxes(){
+  const r=document.getElementById('admin-new-role');
+  const w=document.getElementById('admin-new-member-mailbox-wrap');
+  if(!r||!w) return;
+  w.hidden=(r.value!=='team_member');
+}
+function rebuildAdminNewMemberMailboxChecks(){
+  const host=document.getElementById('admin-new-member-mailbox-checks');
+  if(!host) return;
+  const rows=window._mailboxList||[];
+  if(!rows.length){host.innerHTML='<span class="muted">请先在「邮箱账户」添加邮箱</span>';return;}
+  host.innerHTML=rows.map(m=>'<label style="display:block;margin:4px 0;font-size:13px"><input type="checkbox" class="admin-new-mb-cb" value="'+m.id+'"> '+esc(m.label||m.email_address||m.id)+' <span class="muted">'+esc(m.email_address||'')+'</span></label>').join('');
+}
+function _roleOrderForLeadSelect(r){
+  const o={team_lead:0,admin:1,operator:2,team_member:3,viewer:4};
+  const k=String(r||'');
+  return o[k]!==undefined?o[k]:9;
+}
+function populateTeamLeadSelect(){
+  const sel=document.getElementById('team-new-lead');
+  if(!sel) return;
+  const rows=[...(window._adminUsersCache||[])];
+  rows.sort((a,b)=>{
+    const d=_roleOrderForLeadSelect(a.role)-_roleOrderForLeadSelect(b.role);
+    if(d!==0) return d;
+    return String(a.username||'').localeCompare(String(b.username||''),'zh');
+  });
+  const prev=sel.value;
+  const parts=['<option value="">请选择组长账号…</option>'];
+  for(const u of rows){
+    const inactive=Number(u.is_active)?'':' · 已停用';
+    parts.push('<option value="'+escAttr(String(u.id))+'">'+esc(u.username||('用户'+u.id))+' · '+esc(roleLabelShort(u.role))+' · #'+u.id+inactive+'</option>');
+  }
+  sel.innerHTML=parts.join('');
+  if(prev&&[...sel.options].some(o=>o.value===String(prev))) sel.value=String(prev);
+}
+function formatLeadUserCell(leadUserId){
+  const id=Number(leadUserId);
+  if(!id||isNaN(id)) return '<span class="muted">—</span>';
+  const u=(window._adminUsersCache||[]).find(x=>Number(x.id)===id);
+  if(!u) return '<span class="muted">#'+id+'（刷新账号列表后显示用户名）</span>';
+  const inactive=Number(u.is_active)?'':' <span class="muted">(已停用)</span>';
+  return '<strong>'+esc(u.username)+'</strong> <span class="muted">'+esc(roleLabelShort(u.role))+' · #'+id+'</span>'+inactive;
+}
+function formatTeamMailboxCell(mailboxIds){
+  const ids=mailboxIds||[];
+  if(!ids.length) return '—';
+  const list=window._mailboxList||[];
+  return ids.map(id=>{
+    const m=list.find(x=>Number(x.id)===Number(id));
+    const name=esc((m&& (m.label||m.email_address))||('邮箱 #'+id));
+    const addr=m&&m.email_address?('<span class="muted">'+esc(m.email_address)+'</span>'):('<span class="muted">#'+id+'</span>');
+    return '<div style="margin:2px 0">'+name+' '+addr+'</div>';
+  }).join('');
+}
+window._teamsCache=[];
+let _teamMbModalTeamId=null;
+function applyTeamMbModalFilter(){
+  const inp=document.getElementById('team-mb-filter');
+  if(!inp) return;
+  const q=(inp.value||'').trim().toLowerCase();
+  document.querySelectorAll('#team-mb-checks label').forEach(lab=>{
+    const t=(lab.textContent||'').toLowerCase();
+    lab.style.display=!q||t.includes(q)?'':'none';
+  });
+}
+function renderTeamMbModalChecks(selectedIds){
+  const host=document.getElementById('team-mb-checks');
+  const rows=window._mailboxList||[];
+  const sel=new Set(selectedIds.map(Number));
+  if(!host) return;
+  if(!rows.length){
+    host.innerHTML='<span class="muted">请先在「邮箱账户」中添加邮箱账户。</span>';
+    return;
+  }
+  host.innerHTML=rows.map(m=>{
+    const checked=sel.has(Number(m.id))?' checked':'';
+    return '<label><input type="checkbox" class="team-mb-cb" value="'+String(m.id)+'"'+checked+'> '+
+      esc(m.label||m.email_address||m.id)+' <span class="muted">'+esc(m.email_address||'')+'</span> <span class="muted">#'+m.id+'</span></label>';
+  }).join('');
+  applyTeamMbModalFilter();
+}
+function closeTeamMailboxModal(){
+  const ov=document.getElementById('team-mailbox-modal');
+  if(ov) ov.hidden=true;
+  _teamMbModalTeamId=null;
+}
+function editTeamMailboxes(tid){
+  const t=(window._teamsCache||[]).find(x=>Number(x.id)===Number(tid));
+  const selected=(t&&t.mailbox_ids)?t.mailbox_ids.map(Number):[];
+  _teamMbModalTeamId=tid;
+  const ov=document.getElementById('team-mailbox-modal');
+  const fi=document.getElementById('team-mb-filter');
+  if(fi) fi.value='';
+  renderTeamMbModalChecks(selected);
+  if(ov) ov.hidden=false;
+}
+async function saveTeamMailboxModal(){
+  if(_teamMbModalTeamId==null) return;
+  const boxes=document.querySelectorAll('#team-mb-checks input.team-mb-cb:checked');
+  const ids=Array.from(boxes).map(cb=>parseInt(cb.value,10)).filter(n=>!isNaN(n)&&n>0);
+  const tid=_teamMbModalTeamId;
+  try{
+    await fetchJson('/teams/'+tid+'/mailboxes',{method:'PUT',body:JSON.stringify({mailbox_ids:ids})});
+    closeTeamMailboxModal();
+    showBanner('已更新管辖邮箱',true);
+    await loadTeamsAdmin();
+  }catch(e){
+    showBanner('失败: '+e.message,false);
+  }
+}
+
+window._adminUsersCache=[];
+let _memberMbModalUserId=null;
+function applyMemberMbModalFilter(){
+  const inp=document.getElementById('member-mb-filter');
+  if(!inp) return;
+  const q=(inp.value||'').trim().toLowerCase();
+  document.querySelectorAll('#member-mb-checks label').forEach(lab=>{
+    const t=(lab.textContent||'').toLowerCase();
+    lab.style.display=!q||t.includes(q)?'':'none';
+  });
+}
+function renderMemberMbModalChecks(selectedIds){
+  const host=document.getElementById('member-mb-checks');
+  const rows=window._mailboxList||[];
+  const sel=new Set(selectedIds.map(Number));
+  if(!host) return;
+  if(!rows.length){
+    host.innerHTML='<span class="muted">没有可指派的邮箱。请先添加邮箱账户，或由管理员为该小组配置管辖邮箱。</span>';
+    return;
+  }
+  host.innerHTML=rows.map(m=>{
+    const checked=sel.has(Number(m.id))?' checked':'';
+    return '<label><input type="checkbox" class="member-mb-cb" value="'+String(m.id)+'"'+checked+'> '+
+      esc(m.label||m.email_address||m.id)+' <span class="muted">'+esc(m.email_address||'')+'</span> <span class="muted">#'+m.id+'</span></label>';
+  }).join('');
+  applyMemberMbModalFilter();
+}
+function closeMemberMailboxModal(){
+  const ov=document.getElementById('member-mailbox-modal');
+  if(ov) ov.hidden=true;
+  _memberMbModalUserId=null;
+}
+function saveMemberMailboxes(uid){
+  const u=(window._adminUsersCache||[]).find(x=>Number(x.id)===Number(uid));
+  if(!u||u.role!=='team_member'){
+    showBanner('仅组员可绑定负责邮箱',false);
+    return;
+  }
+  const selected=(u.mailbox_ids||[]).map(Number);
+  _memberMbModalUserId=uid;
+  const ov=document.getElementById('member-mailbox-modal');
+  const fi=document.getElementById('member-mb-filter');
+  if(fi) fi.value='';
+  renderMemberMbModalChecks(selected);
+  if(ov) ov.hidden=false;
+}
+async function saveMemberMailboxModal(){
+  if(_memberMbModalUserId==null) return;
+  const boxes=document.querySelectorAll('#member-mb-checks input.member-mb-cb:checked');
+  const ids=Array.from(boxes).map(cb=>parseInt(cb.value,10)).filter(n=>!isNaN(n)&&n>0);
+  const uid=_memberMbModalUserId;
+  try{
+    await fetchJson('/auth/users/'+encodeURIComponent(uid)+'/mailboxes',{method:'PUT',body:JSON.stringify({mailbox_ids:ids})});
+    closeMemberMailboxModal();
+    showBanner('已绑定邮箱',true);
+    await loadAdminUsers();
+  }catch(e){
+    showBanner('失败: '+e.message,false);
+  }
+}
+async function loadTeamsAdmin(){
+  const tbody=document.getElementById('teams-rows');
+  if(!tbody) return;
+  try{
+    const d=await fetchJson('/teams');
+    const rows=d.teams||[];
+    window._teamsCache=rows;
+    if(!rows.length){tbody.innerHTML='<tr><td colspan="5" class="empty">暂无小组，请创建并绑定邮箱</td></tr>';return;}
+    tbody.innerHTML=rows.map(t=>{
+      const cell=formatTeamMailboxCell(t.mailbox_ids||[]);
+      const leadCell=formatLeadUserCell(t.lead_user_id);
+      return '<tr><td class="muted">'+t.id+'</td><td>'+esc(t.name||'')+'</td><td class="small">'+leadCell+'</td><td class="small">'+cell+'</td><td><button type="button" class="secondary small" onclick="editTeamMailboxes('+t.id+')">编辑管辖邮箱</button> <button type="button" class="danger small" onclick="deleteTeam('+t.id+')">删除</button></td></tr>';
+    }).join('');
+    populateTeamLeadSelect();
+  }catch(err){
+    tbody.innerHTML='<tr><td colspan="5" class="empty">加载失败</td></tr>';
+  }
+}
+async function submitNewTeam(){
+  const name=document.getElementById('team-new-name').value.trim()||'小组';
+  const sel=document.getElementById('team-new-lead');
+  const lead=sel?parseInt(sel.value,10):NaN;
+  if(!lead||isNaN(lead)){showBanner('请选择组长账号',false);return;}
+  try{
+    await fetchJson('/teams',{method:'POST',body:JSON.stringify({name,lead_user_id:lead})});
+    document.getElementById('team-new-name').value='';
+    if(sel) sel.value='';
+    showBanner('已创建小组',true);
+    await loadTeamsAdmin();
+  }catch(err){showBanner('失败: '+err.message,false);}
+}
+function deleteTeam(tid){
+  if(!confirm('删除小组将解除其邮箱绑定（不删用户与邮箱）。确认？')) return;
+  fetchJson('/teams/'+encodeURIComponent(tid),{method:'DELETE'}).then(()=>{showBanner('已删除',true);loadTeamsAdmin();}).catch(e=>showBanner('失败: '+e.message,false));
+}
 async function loadAll(){
   try{
     await loadStatus();
     await loadMailboxAccounts();
     await Promise.all([loadEscalationForm(),loadInbox(),loadEscalations(),loadIntents(),loadSupportStaff(),loadProducts(),loadLogs()]);
+    const u=window._currentUser;
+    if(u&&(u.role==='admin'||u.role==='team_lead'||u.role==='operator')){
+      await loadAdminUsers();
+    }
+    if(document.body.classList.contains('super-admin')){
+      await loadTeamsAdmin();
+    }
     clearBanner();
   }catch(err){
     showBanner('加载失败: '+err.message,false);
   }
 }
 
-loadAll();
+async function loadAdminUsers(){
+  const tbody=document.getElementById('admin-user-rows');
+  if(!tbody) return;
+  try{
+    const data=await fetchJson('/auth/users');
+    const rows=data.users||[];
+    window._adminUsersCache=rows;
+    const myId=window._currentUser&&window._currentUser.id;
+    if(!rows.length){
+      tbody.innerHTML='<tr><td colspan="8" class="empty">暂无账号</td></tr>';
+      if(document.body.classList.contains('super-admin')) populateTeamLeadSelect();
+      return;
+    }
+    tbody.innerHTML=rows.map(u=>{
+      const active=Number(u.is_active)?'checked':'';
+      const delBtn=Number(myId)===Number(u.id)
+        ?'<span class="muted small">当前账号</span>'
+        :'<button type="button" class="danger small need-admin" onclick="deleteAdminUser('+u.id+')">删除</button>';
+      const mbsCell=(u.role==='team_member')?formatTeamMailboxCell(u.mailbox_ids||[]):'<span class="muted">—</span>';
+      const bindMb=(u.role==='team_member')
+        ?' <button type="button" class="secondary small need-admin" onclick="saveMemberMailboxes('+u.id+')">绑定邮箱</button>'
+        :'';
+      return '<tr><td class="muted">'+esc(u.id)+'</td><td>'+esc(u.username)+'</td>'+
+        '<td><select class="admin-role-sel" data-uid="'+u.id+'" style="margin:0">'+htmlRoleSelectOptions(u.role)+'</select></td>'+
+        '<td class="small">'+mbsCell+bindMb+'</td>'+
+        '<td><label class="small" style="margin:0"><input type="checkbox" class="admin-active-cb" data-uid="'+u.id+'"'+active+'> 启用</label></td>'+
+        '<td class="muted small">'+esc((u.created_at||'').slice(0,19))+'</td>'+
+        '<td><input type="password" class="admin-pw" data-uid="'+u.id+'" placeholder="留空不改" autocomplete="new-password" style="margin:0"></td>'+
+        '<td><button type="button" class="secondary small need-admin" onclick="patchAdminUser('+u.id+')">保存</button> '+delBtn+'</td></tr>';
+    }).join('');
+    if(document.body.classList.contains('super-admin')) populateTeamLeadSelect();
+  }catch(err){
+    tbody.innerHTML='<tr><td colspan="8" class="empty">加载失败</td></tr>';
+    console.error(err);
+  }
+}
+
+async function submitNewAdminUser(){
+  const u=document.getElementById('admin-new-user').value.trim();
+  const p=document.getElementById('admin-new-pass').value;
+  const r=document.getElementById('admin-new-role').value;
+  if(!u||!p){showBanner('请填写用户名与密码',false);return;}
+  const body={username:u,password:p,role:r};
+  if(r==='team_member'){
+    body.mailbox_ids=[...document.querySelectorAll('.admin-new-mb-cb:checked')].map(cb=>parseInt(cb.value,10));
+  }
+  try{
+    await fetchJson('/auth/users',{method:'POST',body:JSON.stringify(body)});
+    document.getElementById('admin-new-user').value='';
+    document.getElementById('admin-new-pass').value='';
+    showBanner('已创建用户',true);
+    await loadAdminUsers();
+  }catch(err){showBanner('创建失败: '+err.message,false);}
+}
+
+async function patchAdminUser(uid){
+  const sel=document.querySelector('select.admin-role-sel[data-uid="'+uid+'"]');
+  const cb=document.querySelector('input.admin-active-cb[data-uid="'+uid+'"]');
+  const pw=document.querySelector('input.admin-pw[data-uid="'+uid+'"]');
+  if(!sel||!cb) return;
+  const body={role:sel.value,is_active:cb.checked};
+  const np=(pw&&pw.value||'').trim();
+  if(np) body.password=np;
+  try{
+    await fetchJson('/auth/users/'+encodeURIComponent(uid),{method:'PATCH',body:JSON.stringify(body)});
+    if(pw) pw.value='';
+    showBanner('已更新用户',true);
+    await loadAdminUsers();
+  }catch(err){showBanner('更新失败: '+err.message,false);}
+}
+
+async function deleteAdminUser(uid){
+  if(!confirm('确定删除该用户？其会话将失效。')) return;
+  try{
+    await fetchJson('/auth/users/'+encodeURIComponent(uid),{method:'DELETE'});
+    showBanner('已删除',true);
+    await loadAdminUsers();
+  }catch(err){showBanner('删除失败: '+err.message,false);}
+}
+
+async function bootDashboard(){
+  try{
+    const me=await fetchJson('/auth/me');
+    window._currentUser={id:me.id,username:me.username,role:me.role,mailbox_ids:me.mailbox_ids||[]};
+    window._authMailboxIds=me.mailbox_ids||[];
+    window._memberMailboxLocked=false;
+    const el=document.getElementById('auth-user');
+    if(el) el.textContent=(me.username||'')+' · '+roleLabelShort(me.role);
+    document.body.classList.toggle('viewer-role',me.role==='viewer'||me.role==='team_member');
+    document.body.classList.toggle('admin-role',me.role==='admin'||me.role==='operator'||me.role==='team_lead');
+    document.body.classList.toggle('super-admin',me.role==='admin');
+  }catch(_e){
+    return;
+  }
+  await loadAll();
+}
+(function initAdminNewRoleSelect(){
+  const el=document.getElementById('admin-new-role');
+  if(!el) return;
+  el.innerHTML=htmlRoleSelectOptions('viewer');
+  toggleNewMemberMailboxes();
+})();
+bootDashboard();
 setInterval(()=>loadStatus().catch(()=>{}),5000);
 setInterval(()=>loadLogs().catch(()=>{}),6000);
 </script>

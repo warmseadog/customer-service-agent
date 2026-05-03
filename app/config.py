@@ -44,7 +44,7 @@ class Config:
     SMTP_HOST: str = _get("SMTP_HOST", "smtp.qiye.aliyun.com")
     SMTP_PORT: int = _int("SMTP_PORT", 465)
 
-    # LLM（默认 OpenRouter + Gemini；换供应商改 LLM_BASE_URL / LLM_MODEL）
+    # LLM（默认 OpenRouter + Gemini；换供应商改 .env 中 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL）
     LLM_API_KEY: str = _get("LLM_API_KEY")
     # 统一去掉尾随空格，避免 Bearer 后多出不可见字符导致网关报 Missing Authentication
     LLM_BASE_URL: str = _get("LLM_BASE_URL", "https://openrouter.ai/api/v1")
@@ -114,12 +114,20 @@ class Config:
     # 本条回信之前线程内我方回信数 ≥ 该阈值时，安抚对外采用 empathy_pure（不重复售后时间线套话）；范围 1–32
     _emp = _int("CALM_EMPATHY_ONLY_MIN_PRIOR_OUTBOUND", 3)
     CALM_EMPATHY_ONLY_MIN_PRIOR_OUTBOUND: int = max(1, min(32, _emp))
-    # 进程启动后是否立即开启定时轮询（需手动 POST /stop-auto 才会停）
-    AUTO_START_POLLING: bool = _get("AUTO_START_POLLING", "true").lower() not in (
+    # 进程启动后是否立即开启定时轮询（默认关闭：需在仪表盘点「启动轮询」或 POST /start-auto）
+    AUTO_START_POLLING: bool = _get("AUTO_START_POLLING", "false").lower() not in (
         "false",
         "0",
         "no",
     )
+
+    # ── 仪表盘登录（Cookie 会话）────────────────────────────────────────────
+    AUTH_SESSION_COOKIE: str = _get("AUTH_SESSION_COOKIE", "cs_session")
+    AUTH_SESSION_DAYS: int = max(1, min(365, _int("AUTH_SESSION_DAYS", 7)))
+    # 生产 HTTPS 下设为 true；本地 HTTP 调试需 false，否则浏览器不发送 Secure Cookie
+    AUTH_COOKIE_SECURE: bool = _get("AUTH_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
+    AUTH_BOOTSTRAP_ADMIN_USER: str = _get("AUTH_BOOTSTRAP_ADMIN_USER", "")
+    AUTH_BOOTSTRAP_ADMIN_PASSWORD: str = _get("AUTH_BOOTSTRAP_ADMIN_PASSWORD", "")
 
 
 config = Config()

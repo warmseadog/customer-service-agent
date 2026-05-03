@@ -67,9 +67,18 @@ python -m app.main
 # 或：
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-# 4. 打开仪表盘
-# http://localhost:8000/dashboard
+# 4. 打开登录页并登录（首次启动需在 .env 配置 AUTH_BOOTSTRAP_* 创建管理员，见下节）
+# http://localhost:8000/login
+# 登录成功后进入：http://localhost:8000/dashboard
 ```
+
+### 仪表盘登录与权限（HTTPS + Cookie）
+
+- **入口**：浏览器访问 [`/login`](http://localhost:8000/login)，使用用户名与密码登录；会话保存在 **HttpOnly** Cookie（名称由 `AUTH_SESSION_COOKIE` 配置，默认 `cs_session`），前端 API 请求需携带 Cookie（仪表盘已使用 `credentials: 'include'`）。
+- **首个管理员**：数据库中 **没有任何用户** 时，若 `.env` 设置了 `AUTH_BOOTSTRAP_ADMIN_USER` / `AUTH_BOOTSTRAP_ADMIN_PASSWORD`，进程启动时会自动创建该 **admin** 账号。已有用户后请通过管理员调用 `POST /auth/users` 等方式建号，勿依赖 bootstrap。
+- **角色**：`admin`（全量，含危险批量删除与用户管理）、`operator`（读写业务数据，不含批量删库/删全产品等）、`viewer`（只读；仪表盘上隐藏保存/删除类按钮，**服务端仍会校验**）。管理员登录后可在仪表盘 **「账号管理」** 页新建用户、改角色/启用状态/重置密码、删除用户（不可删除当前登录账号）。
+- **HTTPS**：公网部署时由 Nginx/Caddy 等终结 TLS，并设置 `X-Forwarded-Proto: https`（或 `Forwarded`）。生产环境将 **`AUTH_COOKIE_SECURE=true`**，否则浏览器拒绝在 HTTPS 下发送 `Secure` Cookie。本地 HTTP 调试保持 `AUTH_COOKIE_SECURE=false`。
+- **静态页与接口**：`GET /dashboard` 返回仪表盘 HTML（便于未登录时由前端跳转登录）；**所有 JSON API**（除 `POST /auth/login`、公开 `GET /` 等）均需有效会话。
 
 ---
 
@@ -85,6 +94,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 │   ├── database.py           # SQLite 持久化层
 │   ├── llm_service.py        # LLM 调用：情绪分析 + 回复生成 + 升级摘要
 │   ├── mail_service.py       # IMAP 收件 + SMTP 发件（用户回复 & 内部升级通知）
+│   ├── auth_service.py       # 登录、bootstrap、密码与会话
+│   ├── auth_deps.py          # FastAPI Depends：当前用户与角色
 │   ├── main.py               # FastAPI 入口 + 仪表盘路由
 │   ├── graphs/
 │   │   └── inbound_graph.py  # LangGraph 客服状态机（5 节点）
@@ -92,7 +103,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 │   │   ├── lead_service.py      # 客诉分析查询（意图识别结果）
 │   │   └── product_service.py   # 产品库管理（含 owner 字段）
 │   └── web/
-│       └── dashboard.html    # 单页 Web 仪表盘
+│       ├── dashboard.html    # 单页 Web 仪表盘
+│       └── login.html        # 登录页
 ├── data/
 │   └── products.json         # 本地产品库（初始种子数据，含 owner_name/owner_email）
 ├── .env                      # 实际配置（不提交 Git）
@@ -120,6 +132,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `escalation_events` | 升级事件记录：通知发送至、升级原因、时间戳 |
 | `processed_messages` | 已处理邮件去重记录 |
 | `support_escalation_settings` | 单行：仪表盘覆盖的全局 BACKUP / DEFAULT 收件人（邮箱为空则该字段仍用 .env） |
+| `users` | 仪表盘登录账号：用户名、`password_hash`、角色 `admin`/`operator`/`viewer`、是否启用 |
+| `user_sessions` | 服务端会话：随机 token、用户 FK、过期时间；登出或过期后失效 |
 | `campaigns` / `outreach_messages` / `tickets` | 保留表结构（历史数据兼容），不再写入新数据 |
 
 ### `escalation_events` — 升级事件
@@ -208,7 +222,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | **邮箱账户** | 多台站点邮箱：分别填写 IMAP/SMTP；仪表盘含阿里云企业邮、Gmail、Outlook/Hotmail、Microsoft 365、Yahoo、网易 163 等一键模板。**「测试」**：依次验证 **IMAP**（登录并预览最多 1 封未读，可无未读）与 **SMTP**（与同账号真实发信相同的 TLS/登录流程，**仅 AUTH，不投递邮件**）。对外客服回复与内部升级通知共用该邮箱的 SMTP |
 | **运行日志** | 最近 200 条运行日志（接口 `GET /logs?tail=200`），每 6 秒自动刷新 |
 
-进程启动后默认**开启收件轮询**（环境变量 `AUTO_START_POLLING=true`）；仅在仪表盘点击「停止轮询」或结束进程后停止。设为 `false` 时需手动调用 `POST /start-auto`。详见上文 **[运行日志与耗时](#运行日志与耗时)**；若 `LLM_API_KEY` 为空，启动时会打错误级提示，且 `call_llm` 会抛出明确错误而非含糊 401。
+进程启动后**默认不自动开启**收件轮询（`AUTO_START_POLLING` 默认为 `false`）；需在仪表盘点击「启动轮询」或调用 `POST /start-auto`。设为 `true` 则启动进程后即按间隔后台轮询；停止请点「停止轮询」或结束进程。详见 **[运行日志与耗时](#运行日志与耗时)**；若 `LLM_API_KEY` 为空，`call_llm` 会抛出明确错误。
 
 **说明**：已不再提供「来函客户」类手工客户表维护；`creators` 仅由收信流程按需写入，用于会话与升级展示关联。
 
@@ -230,7 +244,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 |---|---|
 | `GET /dashboard` | Web 仪表盘 |
 | `POST /check` | 立即触发一轮来信检查；若上一轮检查（含后台定时轮询中的 `run_check_cycle`）仍在执行，`asyncio.Lock` 未释放，返回 **409 Conflict**：`已有检查任务正在后台运行，请勿重复点击` |
-| `POST /start-auto` | 启动后台定时轮询（进程默认已自动开启时返回 `already_running`） |
+| `POST /start-auto` | 启动后台定时轮询；若已在运行则返回 `already_running` |
 | `POST /stop-auto` | 停止后台轮询（停止后需再次调用 `/start-auto` 才会恢复） |
 | `GET /status` | 服务状态（含 `auto_polling`、`auto_start_polling_default`、`poll_interval_seconds`、汇总数据等） |
 | `GET /settings/escalation` | 全局 DEFAULT：数据库覆盖值、生效值、.env 对照（body 与仪表盘表单项一一对应） |
@@ -297,7 +311,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `MAX_THREAD_MESSAGES` | 10 | 每线程送 LLM 的最大历史条数 |
 | `BODY_EXCERPT_LENGTH` | 600 | 邮件正文入库截断字符数 |
 | `POLL_INTERVAL` | 120 | **轮询间隔（秒）**。每跑完一整轮检查后休眠该时长再起下一轮：**新来信的理论最大等待时间约等于本轮间隔 + 当周期间隔内尚未开始轮询的排队时间**（另受单轮耗时、来信量影响）。可调小（如 **60**）以加快响应；过小会增加 IMAP/LLM 压力。建议区间见 `.env.example`（常见 60–300）。 |
-| `AUTO_START_POLLING` | true | **进程启动后是否默认开启后台轮询**（`false` 时需手动 `POST /start-auto`） |
+| `AUTO_START_POLLING` | false | **进程启动后是否默认开启后台轮询**（`true` 则随进程自动拉信；`false` 须仪表盘「启动轮询」或 `POST /start-auto`） |
 | `MAX_EMAILS_PER_CYCLE` | 20 | 每个邮箱在每轮最多拉取 / 处理的未读邮件上限 |
 | `MAILBOX_FETCH_MAX_WORKERS` | 8 | **并行连接 IMAP 拉取邮箱数的上限**（实际为 `min(该值, 已启用邮箱数)`；**1** 表示完全顺序拉取）。夹在 **1～64**。多收件箱时可适当调大以缩短单轮拉信阶段耗时；过大可能触发邮服或网络侧并发连接限制。 |
 | `EMAIL_PROCESS_MAX_WORKERS` | 4 | **每轮处理来信时的并行线程上限**（夹在 **1～16**；**1** 表示处理阶段完全串行，与旧行为一致）。实际并发为 `min(该值, 本会话批次数)`：系统按 **邮件会话**（`thread_scoped`）分组，**同一会话内**多封未读仍**顺序**处理，**不同会话**可并行以缩短总墙钟时间。过大可能触发 OpenRouter 限流或 SQLite 锁等待。 |
