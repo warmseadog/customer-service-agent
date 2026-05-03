@@ -1,5 +1,6 @@
 """
-邮箱级 RBAC：组长 / 组员可见范围；与 admin、operator、viewer（不按邮箱过滤读）区分。
+邮箱级 RBAC：组长 / 组员 / 观摩（可选绑定邮箱）读范围；
+与 admin、operator（全站）及未绑定邮箱的 viewer（全站只读）区分。
 """
 
 from __future__ import annotations

@@ -15,8 +15,15 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from app.agent import run_check_cycle
-from app.auth_deps import RequireAdmin, RequireAdminOrLead, RequireOperator, RequireViewer
+from app.agent import run_check_cycle, run_mock_inbound
+from app.auth_deps import (
+    RequireAdmin,
+    RequireAdminOrLead,
+    RequireGlobalPolling,
+    RequireOperator,
+    RequireTeamMailboxScoped,
+    RequireViewer,
+)
 from app.auth_service import (
     hash_password,
     logout_by_token,
@@ -66,6 +73,10 @@ from app.database import (
     list_processed_messages,
     list_processed_messages_for_mailboxes,
     list_support_staff,
+    mock_memory_append_after_run,
+    mock_memory_clear,
+    mock_memory_coerce_turn,
+    mock_memory_get_turns,
     rbac_create_team,
     rbac_delete_team,
     rbac_get_member_mailboxes,
@@ -74,6 +85,8 @@ from app.database import (
     rbac_replace_member_mailboxes,
     rbac_set_team_mailboxes,
     rbac_update_team,
+    sanitize_mock_memory_slot,
+    set_thread_manual_handoff,
     update_mailbox,
 )
 from app.mail_service import fetch_unread_emails, run_mailbox_transport_tests
@@ -198,6 +211,126 @@ async def auth_login(payload: dict):
     return _auth_cookie_response(token, {"status": "ok", "user": user})
 
 
+@app.post("/mock/inbound")
+async def mock_inbound_api(payload: dict, user: RequireTeamMailboxScoped):
+    """与真实来信相同的分析/话术链路模拟：不落真实会话表、不发邮件。可选读写沙箱专用对话记忆。"""
+    raw_mid = payload.get("mailbox_id")
+    try:
+        mailbox_id = int(raw_mid)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="mailbox_id 须为整数")
+    ensure_mailbox_in_scope(user, mailbox_id)
+    row = get_mailbox_raw(mailbox_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="邮箱不存在")
+    body_txt = str(payload.get("body") or "")
+    if not body_txt.strip():
+        raise HTTPException(status_code=400, detail="body 不能为空")
+    from_email = str(payload.get("from_email") or "").strip()
+    if not from_email or "@" not in from_email:
+        raise HTTPException(status_code=400, detail="from_email 须为有效邮箱")
+    thread_key_raw = payload.get("thread_key")
+    thread_key: str | None
+    if thread_key_raw is None or str(thread_key_raw).strip() == "":
+        thread_key = None
+    else:
+        thread_key = str(thread_key_raw).strip()
+    product_raw = payload.get("product_id")
+    product_id: str | None
+    if product_raw is None or str(product_raw).strip() == "":
+        product_id = None
+    else:
+        product_id = str(product_raw).strip()
+    prior_raw = payload.get("prior_messages")
+    if prior_raw is None:
+        client_prior: list = []
+    elif isinstance(prior_raw, list):
+        client_prior = prior_raw
+    else:
+        raise HTTPException(status_code=400, detail="prior_messages 须为 JSON 数组")
+
+    use_mem = payload.get("use_conversation_memory")
+    if use_mem is None:
+        use_mem = True
+    persist_mem = payload.get("persist_conversation_memory")
+    if persist_mem is None:
+        persist_mem = True
+    memory_slot = sanitize_mock_memory_slot(str(payload.get("memory_slot") or "default"))
+
+    prior_messages: list = []
+    if use_mem:
+        prior_messages.extend(mock_memory_get_turns(user.id, mailbox_id, memory_slot))
+    for item in client_prior:
+        c = mock_memory_coerce_turn(item)
+        if c and (c.get("body") or "").strip():
+            prior_messages.append(c)
+
+    try:
+        result = await asyncio.to_thread(
+            run_mock_inbound,
+            row,
+            from_email=from_email,
+            from_name=str(payload.get("from_name") or ""),
+            subject=str(payload.get("subject") or ""),
+            body=body_txt,
+            thread_key=thread_key,
+            prior_messages=prior_messages,
+            product_id=product_id,
+        )
+    except Exception as exc:
+        _raise_server_error(exc)
+
+    mem_meta = None
+    if persist_mem and result.get("dry_run"):
+        mem_meta = mock_memory_append_after_run(
+            user.id,
+            mailbox_id,
+            memory_slot,
+            customer_body=body_txt.strip(),
+            customer_subject=str(payload.get("subject") or ""),
+            our_reply=str(result.get("suggested_reply") or ""),
+        )
+    return {
+        "status": "ok",
+        **result,
+        "conversation_memory_slot": memory_slot,
+        "conversation_memory_updated": mem_meta,
+        "use_conversation_memory": bool(use_mem),
+        "persist_conversation_memory": bool(persist_mem),
+    }
+
+
+@app.get("/mock/memory")
+async def mock_memory_read_api(
+    user: RequireTeamMailboxScoped,
+    mailbox_id: int,
+    slot: str = "default",
+):
+    """读取当前用户对某邮箱的沙箱对话记忆。"""
+    ensure_mailbox_in_scope(user, mailbox_id)
+    ms = sanitize_mock_memory_slot(slot)
+    turns = mock_memory_get_turns(user.id, mailbox_id, ms)
+    return {
+        "mailbox_id": mailbox_id,
+        "slot": ms,
+        "turns": turns,
+        "count": len(turns),
+    }
+
+
+@app.delete("/mock/memory")
+async def mock_memory_delete_api(
+    user: RequireTeamMailboxScoped,
+    mailbox_id: int,
+    slot: str = "default",
+):
+    """清空本条沙箱对话记忆以便从头演练。"""
+    ensure_mailbox_in_scope(user, mailbox_id)
+    ms = sanitize_mock_memory_slot(slot)
+    deleted = mock_memory_clear(user.id, mailbox_id, ms)
+    return {"status": "ok", "mailbox_id": mailbox_id, "slot": ms, "deleted": deleted}
+
+
 @app.post("/auth/logout")
 async def auth_logout(request: Request):
     logout_by_token(request.cookies.get(config.AUTH_SESSION_COOKIE))
@@ -211,6 +344,10 @@ async def auth_me(user: RequireViewer):
     mids: list[int] = []
     if user.role == "team_member":
         mids = rbac_get_member_mailboxes(user.id)
+    elif user.role == "viewer":
+        scoped = mailbox_scope(user)
+        if scoped is not None:
+            mids = sorted(scoped)
     return {
         "id": user.id,
         "username": user.username,
@@ -237,7 +374,8 @@ async def auth_users_list(_: RequireAdminOrLead):
     out = []
     for u in rows:
         d = dict(u)
-        if str(d.get("role")) == "team_member":
+        role_s = str(d.get("role") or "")
+        if role_s == "team_member" or role_s == "viewer":
             d["mailbox_ids"] = rbac_get_member_mailboxes(int(d["id"]))
         else:
             d["mailbox_ids"] = []
@@ -261,7 +399,7 @@ async def auth_users_create(actor: RequireAdminOrLead, payload: dict):
         )
     except Exception as exc:
         _raise_bad_request(exc)
-    if role == "team_member":
+    if role in ("team_member", "viewer"):
         mids_raw = payload.get("mailbox_ids")
         if isinstance(mids_raw, list) and mids_raw:
             norm = []
@@ -285,8 +423,11 @@ async def auth_user_mailboxes_put(actor: RequireAdminOrLead, user_id: int, paylo
         raise HTTPException(status_code=404, detail="用户不存在")
     tr = str(target.get("role") or "")
     _forbid_non_admin_touching_admin(actor.role, tr)
-    if tr != "team_member":
-        raise HTTPException(status_code=400, detail="仅组员可绑定负责邮箱")
+    if tr not in ("team_member", "viewer"):
+        raise HTTPException(
+            status_code=400,
+            detail="仅组员或观摩账号可绑定邮箱范围（观摩绑定后仅限只读查阅这些邮箱）",
+        )
     mids_raw = payload.get("mailbox_ids")
     if not isinstance(mids_raw, list):
         raise HTTPException(status_code=400, detail="mailbox_ids 须为数组")
@@ -299,7 +440,7 @@ async def auth_user_mailboxes_put(actor: RequireAdminOrLead, user_id: int, paylo
     if actor.role != "admin":
         for mb in norm:
             if not rbac_lead_can_assign_mailbox(actor.id, mb):
-                raise HTTPException(status_code=403, detail=f"无权将邮箱 {mb} 指派给组员")
+                raise HTTPException(status_code=403, detail=f"无权将邮箱 {mb} 指派给该用户（组长仅能选本组管辖邮箱）")
     rbac_replace_member_mailboxes(user_id, norm)
     return {"status": "ok", "user_id": user_id, "mailbox_ids": rbac_get_member_mailboxes(user_id)}
 
@@ -507,7 +648,7 @@ async def put_escalation_settings_api(payload: dict, user: RequireOperator):
 
 
 @app.post("/start-auto")
-async def start_auto(user: RequireOperator):
+async def start_auto(user: RequireGlobalPolling):
     if _is_running:
         return {"status": "already_running", "poll_interval_seconds": config.POLL_INTERVAL}
     _start_polling_background()
@@ -515,11 +656,23 @@ async def start_auto(user: RequireOperator):
 
 
 @app.post("/stop-auto")
-async def stop_auto(user: RequireOperator):
+async def stop_auto(user: RequireGlobalPolling):
     if not _is_running and not _bg_task:
         return {"status": "not_running"}
     await _stop_polling_background(log_stop=True)
     return {"status": "stopped"}
+
+
+@app.put("/mailboxes/{mailbox_id}/poll")
+async def mailbox_poll_put(mailbox_id: int, payload: dict, user: RequireTeamMailboxScoped):
+    """开启/暂停本邮箱参与自动轮询（与全局轮询独立；专员/管理员不限邮箱，组长组员仅限权限内邮箱）。"""
+    ensure_mailbox_in_scope(user, mailbox_id)
+    if "poll_enabled" not in payload or not isinstance(payload.get("poll_enabled"), bool):
+        raise HTTPException(status_code=400, detail="请求体须包含布尔字段 poll_enabled")
+    row = update_mailbox(mailbox_id, {"poll_enabled": payload["poll_enabled"]})
+    if not row:
+        raise HTTPException(status_code=404, detail="邮箱不存在")
+    return {"status": "ok", "mailbox": row}
 
 
 @app.post("/check")
@@ -582,6 +735,7 @@ async def mailboxes_create(payload: dict, user: RequireOperator):
 
 @app.put("/mailboxes/{mailbox_id}")
 async def mailboxes_update(mailbox_id: int, payload: dict, user: RequireOperator):
+    ensure_mailbox_in_scope(user, mailbox_id)
     try:
         row = update_mailbox(mailbox_id, payload)
         if not row:
@@ -595,6 +749,7 @@ async def mailboxes_update(mailbox_id: int, payload: dict, user: RequireOperator
 
 @app.delete("/mailboxes/{mailbox_id}")
 async def mailboxes_delete(mailbox_id: int, user: RequireOperator):
+    ensure_mailbox_in_scope(user, mailbox_id)
     if not delete_mailbox(mailbox_id):
         raise HTTPException(status_code=404, detail="mailbox not found")
     return {"status": "deleted", "id": mailbox_id}
@@ -602,6 +757,7 @@ async def mailboxes_delete(mailbox_id: int, user: RequireOperator):
 
 @app.post("/mailboxes/{mailbox_id}/test")
 async def mailbox_test(mailbox_id: int, user: RequireOperator):
+    ensure_mailbox_in_scope(user, mailbox_id)
     row = get_mailbox_raw(mailbox_id)
     if not row:
         raise HTTPException(status_code=404, detail="mailbox not found")
@@ -768,6 +924,26 @@ async def get_thread(user: RequireViewer, thread_id: str, limit: int = 30):
     ensure_thread_in_scope(user, thread_id)
     rows = get_thread_messages(thread_id, limit=limit)
     return {"thread_id": thread_id, "count": len(rows), "messages": rows}
+
+
+@app.patch("/thread/{thread_id}/manual-handoff")
+async def thread_manual_handoff_api(thread_id: str, payload: dict, user: RequireTeamMailboxScoped):
+    """组长/组员/管理员：标记人工已结案，后续来信不自动回复（仍归档）。"""
+    ensure_thread_in_scope(user, thread_id)
+    mc = payload.get("manual_handoff_completed")
+    if not isinstance(mc, bool):
+        raise HTTPException(status_code=400, detail="请求体须包含布尔字段 manual_handoff_completed")
+    row = set_thread_manual_handoff(
+        thread_id,
+        mc,
+        actor_user_id=user.id if mc else None,
+    )
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="暂无该会话状态，请待系统处理过一封信件后再标记",
+        )
+    return {"status": "ok", "thread": row}
 
 
 @app.delete("/thread/{thread_id}")

@@ -199,6 +199,14 @@ def _migrate_thread_scope(conn: sqlite3.Connection) -> None:
         logger.warning("message_id ??: %s", e)
 
 
+def _ensure_mailbox_poll_enabled_column(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(mailboxes)").fetchall()}
+    if "poll_enabled" not in cols:
+        conn.execute(
+            "ALTER TABLE mailboxes ADD COLUMN poll_enabled INTEGER NOT NULL DEFAULT 1"
+        )
+
+
 def _ensure_kol_threads_mailbox_id(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(kol_threads)").fetchall()}
     if "mailbox_id" not in cols:
@@ -210,9 +218,12 @@ def _ensure_kol_threads_mailbox_id(conn: sqlite3.Connection) -> None:
         """,
         (SEP, SEP),
     )
+
+
 def ensure_mailboxes_schema_and_migrate(conn: sqlite3.Connection) -> None:
     _ensure_mailboxes_table(conn)
     _seed_default_mailbox(conn)
     _migrate_processed_messages(conn)
     _migrate_thread_scope(conn)
     _ensure_kol_threads_mailbox_id(conn)
+    _ensure_mailbox_poll_enabled_column(conn)

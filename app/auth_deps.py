@@ -61,6 +61,14 @@ RequireOperator = Annotated[
     CurrentUser,
     Depends(require_roles("admin", "operator", "team_lead")),
 ]
+RequireGlobalPolling = Annotated[
+    CurrentUser,
+    Depends(require_roles("admin", "operator")),
+]
+RequireTeamMailboxScoped = Annotated[
+    CurrentUser,
+    Depends(require_roles("admin", "operator", "team_lead", "team_member")),
+]
 RequireAdmin = Annotated[CurrentUser, Depends(require_roles("admin"))]
 RequireAdminOrLead = Annotated[
     CurrentUser,

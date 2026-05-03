@@ -5,36 +5,89 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>拓基时代 · 客服邮件工作台</title>
 <style>
-*{box-sizing:border-box}body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#0f172a;color:#e2e8f0}
-.wrap{max-width:1480px;margin:0 auto;padding:20px}
-h1,h2,h3{margin:0}.top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;margin-bottom:18px}
+:root{
+  --bg-deep:#0b1020;
+  --bg-page:#0f172a;
+  --surface:#111827;
+  --surface-raised:#1e293b;
+  --border:#1f2937;
+  --border-strong:#334155;
+  --text:#e2e8f0;
+  --text-muted:#94a3b8;
+  --accent:#6366f1;
+  --accent-soft:rgba(99,102,241,0.14);
+  --success:#34d399;
+  --danger:#f87171;
+  --radius-lg:16px;
+  --shadow-card:0 1px 0 rgba(255,255,255,0.04) inset,0 12px 32px rgba(0,0,0,0.25);
+  --font-sans:system-ui,-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:0.01ms!important;animation-iteration-count:1!important;transition-duration:0.01ms!important}
+  .card-stat.is-running .poll-dot{animation:none!important}
+}
+body{
+  margin:0;
+  font-family:var(--font-sans);
+  background:var(--bg-page);
+  background-image:
+    radial-gradient(ellipse 120% 80% at 0% -20%,rgba(99,102,241,0.16),transparent 55%),
+    radial-gradient(ellipse 90% 55% at 100% 0%,rgba(34,211,238,0.06),transparent 45%);
+  color:var(--text);
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1480px;margin:0 auto;padding:20px 20px 48px}
+h1,h2,h3{margin:0}
+.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;flex-wrap:wrap;margin-bottom:20px}
 .hero{flex:1;min-width:min(100%,280px);max-width:920px}
-.brand-kicker{margin:0 0 10px;padding-bottom:10px;border-bottom:1px solid #1f2937;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
-.brand-kicker .brand-cn{font-size:15px;font-weight:700;color:#e2e8f0}
+.top-actions{display:flex;flex-direction:column;align-items:flex-end;gap:12px;flex-shrink:0}
+.user-strip{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.user-chip{font-size:13px;color:var(--text-muted);padding:6px 12px;border-radius:999px;background:var(--surface);border:1px solid var(--border-strong);max-width:min(100%,320px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brand-kicker{margin:0 0 10px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.brand-kicker .brand-cn{font-size:15px;font-weight:700;color:var(--text)}
 .brand-kicker .brand-en{font-size:10px;font-weight:600;color:#64748b;letter-spacing:0.12em;text-transform:uppercase}
-.hero-body h1{font-size:1.75rem;font-weight:700;color:#e2e8f0}
+.hero-body h1{font-size:clamp(1.4rem,2.5vw,1.85rem);font-weight:700;color:var(--text);letter-spacing:-0.02em}
 .hero-body{min-height:0}
-.hero p{color:#94a3b8;line-height:1.6;margin:8px 0 0}
-.controls{display:flex;gap:10px;flex-wrap:wrap}
-button,.btn{background:#6366f1;color:#fff;border:none;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;transition:all 0.2s ease}
-button:hover,.btn:hover{filter:brightness(1.15);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,0.2)}
+.hero p{color:var(--text-muted);line-height:1.65;margin:10px 0 0;font-size:14px}
+.controls{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+button,.btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;transition:filter 0.2s ease,transform 0.2s ease,box-shadow 0.2s ease}
+button:focus-visible,.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button:hover,.btn:hover{filter:brightness(1.12);transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,0.22)}
 button:active,.btn:active{transform:translateY(0);box-shadow:none;filter:brightness(1)}
 button:disabled,.btn:disabled{opacity:0.6;cursor:not-allowed;transform:none;box-shadow:none;filter:none}
-button.secondary,.btn.secondary{background:#1e293b;border:1px solid #334155;color:#e2e8f0}
+button.secondary,.btn.secondary{background:var(--surface-raised);border:1px solid var(--border-strong);color:var(--text)}
 button.warn{background:#f59e0b;color:#111827}button.danger{background:#dc2626}
 button.success{background:#16a34a}
 .banner{display:none;margin-bottom:16px;padding:12px 14px;border-radius:10px;border:1px solid #854d0e;background:#422006;color:#fcd34d}
 .banner.show{display:block}.banner.ok{border-color:#14532d;background:#052e16;color:#86efac}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:18px}
-.card{background:#111827;border:1px solid #1f2937;border-radius:14px;padding:16px}
-.card .label{font-size:12px;color:#94a3b8;margin-bottom:8px}.card .value{font-size:22px;font-weight:700}
-.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.tab{background:#1e293b;color:#cbd5e1}.tab.active{background:#4f46e5}
-.panel{display:none;background:#111827;border:1px solid #1f2937;border-radius:16px;padding:16px}.panel.active{display:block}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:14px;margin-bottom:20px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow-card);transition:border-color 0.2s ease,box-shadow 0.2s ease}
+.card:hover{border-color:#2d3a4f}
+.card .label{font-size:12px;color:var(--text-muted);margin-bottom:8px;font-weight:500;letter-spacing:0.02em}
+.card .value{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+.card-stat.is-running{border-color:rgba(52,211,153,0.35);box-shadow:var(--shadow-card),0 0 0 1px rgba(52,211,153,0.12) inset}
+.card-stat.is-stopped .value{color:#94a3b8}
+.card-stat .value{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.poll-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;background:#64748b;box-shadow:0 0 0 2px rgba(100,116,139,0.25)}
+.card-stat.is-running .poll-dot{background:var(--success);box-shadow:0 0 0 2px rgba(52,211,153,0.35),0 0 14px rgba(52,211,153,0.45)}
+@keyframes poll-pulse{50%{opacity:0.75}}
+.card-stat.is-running .poll-dot{animation:poll-pulse 2.2s ease-in-out infinite}
+.tabs-wrap{position:sticky;top:0;z-index:30;margin:0 -4px 16px;padding:10px 4px 12px;background:linear-gradient(180deg,rgba(15,23,42,0.92) 60%,rgba(15,23,42,0));backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.tabs{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;margin:0;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:#334155 transparent}
+.tabs::-webkit-scrollbar{height:4px}
+.tabs::-webkit-scrollbar-thumb{background:#334155;border-radius:4px}
+.tab{background:var(--surface-raised);color:#cbd5e1;flex-shrink:0;border:1px solid transparent}
+.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tab.active{background:linear-gradient(180deg,#4f46e5,#4338ca);border-color:rgba(255,255,255,0.12);color:#fff;box-shadow:0 4px 14px rgba(79,70,229,0.35)}
+.panel{display:none;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;box-shadow:var(--shadow-card)}.panel.active{display:block}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-.box{background:#0b1220;border:1px solid #1f2937;border-radius:14px;padding:16px}
+.box{background:var(--bg-deep);border:1px solid var(--border);border-radius:14px;padding:16px}
 .box h3{font-size:16px;margin-bottom:12px}
 label{display:block;font-size:12px;color:#94a3b8;margin-bottom:6px}
-input,textarea,select{width:100%;background:#020617;color:#e2e8f0;border:1px solid #334155;border-radius:10px;padding:10px 12px;margin-bottom:12px}
+input,textarea,select{width:100%;background:#020617;color:var(--text);border:1px solid var(--border-strong);border-radius:10px;padding:10px 12px;margin-bottom:12px}
+input:focus-visible,textarea:focus-visible,select:focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);outline:none}
 input[readonly]{opacity:0.92;cursor:default}
 input[type=checkbox]{width:auto;max-width:none;margin-bottom:0;vertical-align:middle}
 textarea{min-height:90px;resize:vertical}
@@ -61,6 +114,25 @@ textarea{min-height:90px;resize:vertical}
 body.viewer-role .need-op{display:none!important}
 body:not(.admin-role) .need-admin{display:none!important}
 body:not(.super-admin) .need-super-admin{display:none!important}
+.need-global-poll{display:none!important}
+.global-poll-admin .need-global-poll{display:inline-flex!important}
+.need-mailbox-poll-toggle{display:none!important}
+.mailbox-poll-delegates .need-mailbox-poll-toggle{display:inline-flex!important;flex-wrap:wrap;gap:6px;align-items:center}
+.need-thread-handoff{display:none!important}
+.thread-handoff-delegates .need-thread-handoff{display:inline-flex!important}
+body:not(.sandbox-scope) .sandbox-tab{display:none!important}
+/* 仅超级管理员：与 RequireAdmin 的全站清空类接口一致 */
+body:not(.super-admin) .need-full-admin{display:none!important}
+/* 按角色隐藏整块导航/版面（见 bootDashboard 的 role-* 类） */
+body.role-viewer .hide-for-viewer{display:none!important}
+body.role-team-member .hide-for-team-member{display:none!important}
+body.role-team-lead .mailbox-lead-only-hint{display:block!important}
+.hero-hint{margin:10px 0 0;font-size:14px;line-height:1.65;color:var(--text-muted)}
+.hero-hint-viewer,.hero-hint-member{display:none}
+body.role-viewer .hero-hint-full{display:none!important}
+body.role-viewer .hero-hint-viewer{display:block!important}
+body.role-team-member .hero-hint-full{display:none!important}
+body.role-team-member .hero-hint-member{display:block!important}
 .msg-row .msg-meta{font-size:11px;color:#94a3b8;margin-bottom:6px}
 .msg-row .msg-body{white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.55;border-radius:10px;padding:10px 12px}
 .msg-them .msg-body{background:#0f172a;border:1px solid #334155}
@@ -92,9 +164,11 @@ body:not(.super-admin) .need-super-admin{display:none!important}
 .subtabs-wrap{margin-bottom:4px;border-bottom:1px solid #1f2937;display:flex;gap:2px;flex-wrap:wrap;align-items:flex-end}
 .subtab{background:transparent;border:none;color:#94a3b8;padding:8px 12px 10px;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;border-radius:8px 8px 0 0;margin-bottom:-1px;white-space:nowrap}
 .subtab:hover{color:#cbd5e1}
-.subtab.active{color:#a5b4fc;border-bottom-color:#6366f1;background:rgba(99,102,241,0.12)}
+.subtab.active{color:#a5b4fc;border-bottom-color:var(--accent);background:var(--accent-soft)}
+.subtab:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
 .icon-search-btn{width:40px;height:40px;padding:0;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;background:#1e293b;border:1px solid #334155;color:#cbd5e1;cursor:pointer}
 .icon-search-btn:hover{color:#e2e8f0;filter:brightness(1.08)}
+.icon-search-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .icon-search-btn svg{flex-shrink:0}
 .mailbox-search-panel{margin:6px 0 12px;padding:12px 14px;background:#020617;border:1px solid #334155;border-radius:10px;max-width:520px}
 .mailbox-search-panel input{margin-bottom:0}
@@ -105,8 +179,103 @@ body:not(.super-admin) .need-super-admin{display:none!important}
 .modal-box{max-width:520px;width:100%;max-height:88vh;display:flex;flex-direction:column;background:#111827;border:1px solid #1f2937;border-radius:16px;padding:16px;box-shadow:0 25px 50px rgba(0,0,0,0.45)}
 .modal-box h3{margin-bottom:6px}
 .team-mb-check-scroll{overflow:auto;max-height:min(380px,52vh);margin:10px 0;padding:10px 12px;background:#020617;border-radius:10px;border:1px solid #334155}
-.team-mb-check-scroll label{display:block;margin-bottom:8px;font-size:13px;color:#e2e8f0;cursor:pointer}
-#team-mb-filter{margin-bottom:0}
+.accounts-split{display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,1.15fr);gap:20px;align-items:start;margin-bottom:20px}
+@media (max-width:960px){.accounts-split{grid-template-columns:1fr}}
+.role-compare-wrap{background:var(--bg-deep);border:1px solid var(--border);border-radius:14px;padding:14px 16px}
+.role-compare-wrap h4{margin:0 0 10px;font-size:14px;font-weight:700;color:var(--text)}
+.role-compare{font-size:11px;width:100%;border-collapse:collapse;line-height:1.35}
+.role-compare th,.role-compare td{border:1px solid var(--border-strong);padding:8px 6px;text-align:center;vertical-align:middle}
+.role-compare th:first-child{text-align:left;min-width:7.5em}
+.role-compare th{background:#131a2a;color:#94a3b8;font-weight:600;font-size:10px;text-transform:none}
+.role-compare td:first-child{text-align:left;min-width:7.5em;font-weight:600;color:#cbd5e1}
+.role-compare td.ok{color:#86efac;font-weight:600}
+.role-compare td.partial{color:#fcd34d}
+.role-compare td.no{color:#64748b}
+/* 流程沙箱 */
+.sandbox-panel .sandbox-lead{margin:0 0 14px;font-size:13px;line-height:1.6;color:var(--text-muted);max-width:52em}
+.sandbox-block{margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+.sandbox-block h4{margin:0 0 6px;font-size:13px;font-weight:700;color:var(--text);letter-spacing:0.02em}
+.sandbox-block .sandbox-hint{font-size:11px;color:#64748b;margin:0 0 10px;line-height:1.45}
+.sandbox-block .sandbox-hint code{font-size:10px}
+.sandbox-run-wrap{margin:6px 0 14px}
+.sandbox-run-wrap .success{width:100%;padding:12px 16px;font-size:15px;font-weight:700;border-radius:12px}
+.sandbox-advanced{border:1px solid var(--border-strong);border-radius:12px;background:var(--bg-deep);overflow:hidden}
+.sandbox-advanced summary{cursor:pointer;font-size:12px;font-weight:600;color:#94a3b8;padding:12px 14px;list-style:none;user-select:none}
+.sandbox-advanced summary::-webkit-details-marker{display:none}
+.sandbox-advanced[open] summary{color:#cbd5e1;border-bottom:1px solid var(--border)}
+.sandbox-advanced .sandbox-adv-inner{padding:14px 14px 6px}
+.sandbox-advanced .sandbox-adv-inner label{margin-bottom:8px}
+.sandbox-output-box h3{margin-bottom:6px}
+.sandbox-output-box .sandbox-out-hint{margin:0 0 12px;font-size:12px;line-height:1.5;color:var(--text-muted)}
+.sandbox-output-box .sandbox-out-hint code{font-size:11px}
+/* 推演结果：单栏纵向滚动，完整展示「上下文 → 来信 → 回复 → 译文」 */
+.mock-result-scroller{
+  max-height:min(72vh,720px);
+  overflow-y:auto;
+  overflow-x:hidden;
+  border:1px solid var(--border-strong);
+  border-radius:12px;
+  background:var(--bg-deep);
+  padding:14px 8px 14px 14px;
+  scrollbar-gutter:stable;
+}
+.mock-result-scroller::-webkit-scrollbar{width:10px}
+.mock-result-scroller::-webkit-scrollbar-track{background:transparent;border-radius:6px}
+.mock-result-scroller::-webkit-scrollbar-thumb{background:#3d4f63;border-radius:6px;border:2px solid var(--bg-deep)}
+.mock-result-scroller::-webkit-scrollbar-thumb:hover{background:#4b627a}
+.mock-thread-section{margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--border)}
+.mock-thread-section:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none}
+.mock-thread-label{font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:0.03em;margin:0 0 8px}
+.mock-thread-body{
+  white-space:pre-wrap;
+  word-break:break-word;
+  font-size:13px;
+  line-height:1.68;
+  color:#e2e8f0;
+  background:#020617;
+  border:1px solid #1f2937;
+  border-radius:10px;
+  padding:14px 16px;
+  margin:0;
+  min-height:0;
+}
+.mock-thread-body.mock-thread-body-muted{color:#94a3b8;font-size:12px;line-height:1.55}
+.mock-thread-body.mock-result-zh{color:#cbd5e1}
+.mock-thread-body.is-placeholder{color:#64748b;font-style:italic;font-size:12px;background:#0f172a;border-color:#1e293b}
+/* 沙箱：顶部对话时间线 */
+.sandbox-timeline-head{font-size:12px;font-weight:700;color:#94a3b8;margin:0 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border);letter-spacing:0.04em}
+.mock-result-timeline{min-height:8px;margin-bottom:8px}
+.sandbox-turn{display:flex;margin-bottom:14px;gap:10px;align-items:flex-start}
+.sandbox-turn-kol{flex-direction:row}
+.sandbox-turn-our{flex-direction:row-reverse}
+.sandbox-turn-chip{flex-shrink:0;font-size:11px;font-weight:700;line-height:1;padding:6px 10px;border-radius:999px;max-width:5.5em;text-align:center}
+.sandbox-turn-kol .sandbox-turn-chip{background:rgba(56,189,248,0.14);color:#38bdf8;border:1px solid rgba(56,189,248,0.35)}
+.sandbox-turn-our .sandbox-turn-chip{background:rgba(52,211,153,0.12);color:#6ee7b7;border:1px solid rgba(52,211,153,0.32)}
+.sandbox-turn-body-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px}
+.sandbox-turn-kol .sandbox-turn-body-wrap{align-items:flex-start}
+.sandbox-turn-our .sandbox-turn-body-wrap{align-items:flex-end}
+.sandbox-turn-body{
+  white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.65;
+  max-width:100%;padding:12px 14px;border-radius:12px;margin:0;
+  border:1px solid rgba(148,163,184,0.25);
+}
+.sandbox-turn-kol .sandbox-turn-body{background:#0f172b;color:#e2e8f0;text-align:left;border-top-left-radius:4px}
+.sandbox-turn-our .sandbox-turn-body{background:#0c2418;color:#d1fae5;text-align:left;border-top-right-radius:4px}
+.sandbox-turn-sub{font-size:11px;color:#94a3b8;line-height:1.45;text-align:inherit;max-width:100%}
+.sandbox-turn-our .sandbox-turn-sub{text-align:right}
+.sandbox-zh-slot{
+  white-space:pre-wrap;word-break:break-word;font-size:12px;line-height:1.6;
+  padding:10px 12px;border-radius:10px;background:rgba(30,58,138,0.35);border:1px solid rgba(129,140,248,0.35);color:#c7d2fe;
+  margin-top:2px;text-align:left;width:100%;box-sizing:border-box
+}
+.sandbox-timeline-footnote{font-size:11px;color:#64748b;margin-top:16px;line-height:1.55}
+.sandbox-sentiment-banner{margin:10px 0 14px;padding:11px 14px;border-radius:12px;background:#0f172a;border:1px solid var(--border-strong);font-size:12px;line-height:1.55;color:#cbd5e1;display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center}
+.sandbox-sentiment-banner .sb-sep{color:#475569;font-weight:600}
+.details-sandbox-copy{margin-top:14px;border:1px solid var(--border-strong);border-radius:12px;background:var(--bg-deep);overflow:hidden}
+.details-sandbox-copy>summary{cursor:pointer;font-size:12px;font-weight:600;color:#94a3b8;padding:12px 14px;list-style:none}
+.details-sandbox-copy[open]>summary{border-bottom:1px solid var(--border);color:#cbd5e1}
+.details-sandbox-copy>summary::-webkit-details-marker{display:none}
+.details-sandbox-copy .sandbox-thread-section:first-of-type{padding-top:4px}
 </style>
 </head>
 <body>
@@ -117,40 +286,47 @@ body:not(.super-admin) .need-super-admin{display:none!important}
       <p class="brand-kicker"><span class="brand-cn">拓基时代</span><span class="brand-en">TUOJISHIDAI</span></p>
       <div class="hero-body">
         <h1>客服邮件工作台</h1>
-        <p>进程<strong>默认不自动收信</strong>，请在准备好邮箱与模型配置后点击「<strong>启动轮询</strong>」；点击「停止轮询」或<strong>关闭进程</strong>后停止。可在「邮箱账户」绑定多台站点邮箱（阿里云企业邮、Gmail、Outlook、Yahoo、163 等，按需填写 IMAP/SMTP）。全局 <strong>兜底收件人</strong> 与<strong>可分配负责人名单</strong>请在「内部客服」页配置。系统仅被动接收入站邮件。</p>
+        <p class="hero-hint hero-hint-full">由<strong>管理员或运营</strong>在准备好邮箱与模型后点击「<strong>启动全局轮询</strong>」开启后台收信；<strong>组长与组员</strong>仅可在「邮箱账户」中<strong>开启/暂停自己权限内各邮箱</strong>的自动拉信。会话支持「<strong>确认已人工处理完</strong>」：标记后<strong>后续客户来信只归档、不自动回复</strong>。全局兜底收件人与可分配负责人名单在「内部客服」配置。</p>
+        <p class="hero-hint hero-hint-viewer">当前为<strong>观摩</strong>账号：仅只读查阅（若管理员已为该账号<strong>绑定邮箱范围</strong>则仅限这些邮箱；否则不限邮箱）。不显示配置与修改入口。</p>
+        <p class="hero-hint hero-hint-member">当前为<strong>组员</strong>账号：仅展示已绑定邮箱相关数据；可在「邮箱账户」中开启/暂停本邮箱拉信，在会话中标记人工结案。产品维护与内部路由请在组长或管理员处配置。</p>
       </div>
     </div>
-    <div class="controls">
-      <button class="success need-op" onclick="api('POST','/start-auto',null,this)">启动轮询</button>
-      <button class="danger need-op" onclick="api('POST','/stop-auto',null,this)">停止轮询</button>
-      <button class="warn need-op" onclick="api('POST','/check',null,this)">立即检查来信</button>
-      <button class="secondary" onclick="handleRefresh(this)">刷新数据</button>
+    <div class="top-actions">
+      <div class="user-strip">
+        <span id="auth-user" class="user-chip" title=""></span>
+        <button type="button" class="secondary small" onclick="logoutDash()">退出登录</button>
+      </div>
+      <div class="controls">
+        <button class="success need-global-poll" onclick="api('POST','/start-auto',null,this)">启动全局轮询</button>
+        <button class="danger need-global-poll" onclick="api('POST','/stop-auto',null,this)">停止全局轮询</button>
+        <button class="warn need-op" onclick="api('POST','/check',null,this)">立即检查来信</button>
+        <button class="secondary" onclick="handleRefresh(this)">刷新数据</button>
+      </div>
     </div>
-  </div>
-  <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin:0 0 14px;flex-wrap:wrap">
-    <span id="auth-user" class="muted small"></span>
-    <button type="button" class="secondary small" onclick="logoutDash()">退出登录</button>
   </div>
 
   <div class="cards">
-    <div class="card"><div class="label">轮询状态</div><div class="value" id="sum-running">-</div></div>
-    <div class="card"><div class="label">产品数量</div><div class="value" id="sum-products">0</div></div>
-    <div class="card"><div class="label">内部客服</div><div class="value" id="sum-handlers">0</div></div>
+    <div class="card card-stat" id="stat-poll-card"><div class="label">轮询状态</div><div class="value"><span class="poll-dot" aria-hidden="true"></span><span id="sum-running">-</span></div></div>
+    <div class="card hide-for-viewer"><div class="label">产品数量</div><div class="value" id="sum-products">0</div></div>
+    <div class="card hide-for-viewer"><div class="label">内部客服</div><div class="value" id="sum-handlers">0</div></div>
     <div class="card"><div class="label">客诉分析记录</div><div class="value" id="sum-intents">0</div></div>
     <div class="card"><div class="label">内部通知</div><div class="value" id="sum-escalations">0</div></div>
-    <div class="card"><div class="label">邮箱账户</div><div class="value" id="sum-mailboxes">0</div></div>
+    <div class="card hide-for-viewer"><div class="label">邮箱账户</div><div class="value" id="sum-mailboxes">0</div></div>
   </div>
 
-  <div class="tabs">
-    <button class="tab active" onclick="switchTab('inbox',this)">客户会话</button>
-    <button class="tab" onclick="switchTab('escalations',this)">内部通知</button>
-    <button class="tab" onclick="switchTab('intents',this)">客诉分析</button>
-    <button class="tab" onclick="switchTab('products',this)">产品库</button>
-    <button class="tab" onclick="switchTab('internal',this)">内部客服</button>
-    <button class="tab" onclick="switchTab('mailboxes',this)">邮箱账户</button>
-    <button type="button" class="tab need-admin" onclick="switchTab('accounts',this)">账号管理</button>
-    <button type="button" class="tab need-super-admin" onclick="switchTab('teams',this)">小组与邮箱</button>
-    <button class="tab" onclick="switchTab('logs',this)">运行日志</button>
+  <div class="tabs-wrap">
+  <div class="tabs" role="tablist" aria-label="工作台分区">
+    <button type="button" role="tab" class="tab active" onclick="switchTab('inbox',this)">客户会话</button>
+    <button type="button" role="tab" class="tab" onclick="switchTab('escalations',this)">内部通知</button>
+    <button type="button" role="tab" class="tab" onclick="switchTab('intents',this)">客诉分析</button>
+    <button type="button" role="tab" class="tab hide-for-viewer" onclick="switchTab('products',this)">产品库</button>
+    <button type="button" role="tab" class="tab hide-for-viewer hide-for-team-member" onclick="switchTab('internal',this)">内部客服</button>
+    <button type="button" role="tab" class="tab hide-for-viewer" onclick="switchTab('mailboxes',this)">邮箱账户</button>
+    <button type="button" role="tab" class="tab need-admin" onclick="switchTab('accounts',this)">账号管理</button>
+    <button type="button" role="tab" class="tab need-super-admin" onclick="switchTab('teams',this)">小组与邮箱</button>
+    <button type="button" role="tab" class="tab sandbox-tab" onclick="switchTab('mock',this)">流程沙箱</button>
+    <button type="button" role="tab" class="tab hide-for-viewer" onclick="switchTab('logs',this)">运行日志</button>
+  </div>
   </div>
 
   <!-- 客户会话（同一会话 = 同一线程的往来邮件，便于排障的会话 ID 见列表） -->
@@ -177,7 +353,7 @@ body:not(.super-admin) .need-super-admin{display:none!important}
               </div>
             </div>
           </div>
-          <button class="danger small need-op" onclick="deleteAllThreads()">清空全部会话</button>
+          <button type="button" class="danger small need-full-admin" onclick="deleteAllThreads()">清空全部会话</button>
         </div>
         <div id="thread-list" class="list"><div class="empty">加载中...</div></div>
       </div>
@@ -193,7 +369,7 @@ body:not(.super-admin) .need-super-admin{display:none!important}
     <div class="box">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <h3>已发内部通知</h3>
-        <button class="danger small need-op" onclick="deleteAllEscalations()">清空本列表</button>
+        <button type="button" class="danger small need-full-admin" onclick="deleteAllEscalations()">清空本列表</button>
       </div>
       <div class="muted" style="margin-bottom:12px">需要人工跟进来信时，系统会按规则给产品负责人/兜底收件人发<strong>内部说明邮件</strong>；本页即这些邮件的留痕（便于对账、排障，不代表已在客户侧展示）。</div>
       <div class="table-wrap">
@@ -210,7 +386,7 @@ body:not(.super-admin) .need-super-admin{display:none!important}
     <div class="box">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h3>客诉分析记录</h3>
-        <button class="danger small need-op" onclick="deleteAllIntents()">清空记录</button>
+        <button type="button" class="danger small need-full-admin" onclick="deleteAllIntents()">清空记录</button>
       </div>
       <div class="table-wrap">
         <table class="tbl">
@@ -222,8 +398,8 @@ body:not(.super-admin) .need-super-admin{display:none!important}
   </section>
 
   <!-- 产品库 -->
-  <section id="tab-products" class="panel">
-    <div class="grid">
+  <section id="tab-products" class="panel hide-for-viewer">
+    <div class="grid hide-for-team-member">
       <div class="box">
         <h3>新增 / 更新产品</h3>
         <div class="muted" style="margin-bottom:12px">产品<strong>负责人</strong>为<strong>内部同事</strong>，用于收<strong>内部通知</strong>。请先在「内部客服」页维护可分配名单，再在此选择；也可选「其他」后手动填写内部邮箱。</div>
@@ -297,7 +473,7 @@ body:not(.super-admin) .need-super-admin{display:none!important}
           <h3 style="margin:0">产品列表</h3>
           <input type="text" id="product-search" placeholder="搜索 ID / 品牌 / 名称 / 负责人..." style="max-width:280px;margin:0;padding:6px 12px;font-size:13px;border-radius:8px;" oninput="filterProducts()">
         </div>
-        <button class="danger small need-op" onclick="deleteAllProducts()">清空全部产品</button>
+        <button type="button" class="danger small need-full-admin" onclick="deleteAllProducts()">清空全部产品</button>
       </div>
       <div class="table-wrap">
         <table class="tbl">
@@ -308,8 +484,8 @@ body:not(.super-admin) .need-super-admin{display:none!important}
     </div>
   </section>
 
-    <!-- 内部客服：可分配负责人名单 + 全局收件人（同一页） -->
-  <section id="tab-internal" class="panel">
+  <!-- 内部客服：可分配负责人名单 + 全局收件人（同一页） -->
+  <section id="tab-internal" class="panel hide-for-viewer hide-for-team-member">
     <div class="box">
       <h3>可分配负责人名单</h3>
       <div class="muted" style="margin:0 0 12px">
@@ -384,9 +560,9 @@ body:not(.super-admin) .need-super-admin{display:none!important}
 
   <!-- 日志 -->
 
-  <section id="tab-mailboxes" class="panel">
+  <section id="tab-mailboxes" class="panel hide-for-viewer">
     <div class="grid">
-      <div class="box">
+      <div class="box hide-for-team-member">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:10px">
           <div>
             <h3>新增 / 编辑邮箱</h3>
@@ -428,7 +604,8 @@ body:not(.super-admin) .need-super-admin{display:none!important}
         </div>
         <div class="two-col">
           <div><label><input id="mb-smtp-ssl" type="checkbox" checked> SMTP 使用 SSL（常见 465）</label></div>
-          <div><label><input id="mb-enabled" type="checkbox" checked> 启用轮询</label></div>
+          <div><label><input id="mb-enabled" type="checkbox" checked> 启用账户（可登录发信）</label></div>
+          <div><label><input id="mb-poll-enabled" type="checkbox" checked> 参与自动拉取未读（组长/组员可单独暂停权限内邮箱）</label></div>
         </div>
         <label><input id="mb-reply-zh" type="checkbox" checked> 回复主题「回复：」网页风格</label>
         <div class="two-col">
@@ -441,11 +618,12 @@ body:not(.super-admin) .need-super-admin{display:none!important}
       </div>
       <div class="box">
         <h3>已配置账户</h3>
+        <p class="muted mailbox-lead-only-hint" style="margin:0 0 10px;font-size:12px;display:none;line-height:1.55"><strong>组长：</strong>在本表<strong>自动拉信</strong>列可「暂停/开启」本组管辖邮箱的后台拉未读（不关全局轮询，只停该邮箱）。若列表为空，请先在「小组与邮箱」为该小组勾选<strong>管辖邮箱</strong>。</p>
         <p class="muted" style="margin:0 0 12px;font-size:12px">「测试」会依次检测：IMAP 登录并预览未读（可无未读）、SMTP 连接并登录（不发信）。</p>
         <div class="table-wrap">
           <table class="tbl">
-            <thead><tr><th>ID</th><th>名称 / 邮箱</th><th>IMAP</th><th>启用</th><th>最后检查 / 错误</th><th>操作</th></tr></thead>
-            <tbody id="mailbox-rows"><tr><td colspan="6" class="empty">加载中</td></tr></tbody>
+            <thead><tr><th>ID</th><th>名称 / 邮箱</th><th>IMAP</th><th>启用</th><th>自动拉信</th><th>最后检查 / 错误</th><th>操作</th></tr></thead>
+            <tbody id="mailbox-rows"><tr><td colspan="7" class="empty">加载中</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -455,31 +633,118 @@ body:not(.super-admin) .need-super-admin{display:none!important}
   <section id="tab-accounts" class="panel need-admin">
     <div class="box">
       <h3 style="margin-bottom:8px">登录账号</h3>
-      <p class="muted" style="margin:0 0 16px;font-size:12px"><strong>超级管理员</strong>：全权（含小组与管辖邮箱、高危批量）。<strong>业务专员</strong>：与组长类似的改写权限，但可见<strong>全站各邮箱</strong>数据、不按邮箱收窄。<strong>组长</strong>：仅本组管辖邮箱范围内业务与账号（可为组员派邮箱）。<strong>组员</strong>：只读、仅已绑定邮箱。<strong>观摩</strong>：只读、可看全站。超级管理员与组长/业务专员可进本页管账号；仅超级管理员可进「小组与邮箱」。</p>
-      <div class="two-col" style="max-width:720px;margin-bottom:20px">
-        <div>
-          <label>新用户名</label>
-          <input id="admin-new-user" autocomplete="off" placeholder="登录名">
+      <p class="muted" style="margin:0 0 16px;font-size:12px;line-height:1.55">超级管理员与组长、业务专员可进入本页管理账号。仅超级管理员可进入「小组与邮箱」、执行全站批量清空，以及指定其他账号为超级管理员。</p>
+      <div class="accounts-split">
+        <div class="accounts-form-col">
+          <div class="two-col">
+            <div>
+              <label>新用户名</label>
+              <input id="admin-new-user" autocomplete="off" placeholder="登录名">
+            </div>
+            <div>
+              <label>初始密码</label>
+              <input id="admin-new-pass" type="password" autocomplete="new-password" placeholder="至少设强密码">
+            </div>
+            <div>
+              <label>角色</label>
+              <select id="admin-new-role" onchange="toggleNewMemberMailboxes()"></select>
+            </div>
+            <div style="grid-column:1/-1" id="admin-new-member-mailbox-wrap" class="muted small" hidden>
+              <label style="margin-bottom:6px;display:block">勾选<strong>组员</strong>负责的邮箱；或勾选<strong>观摩账号</strong>仅能只读查阅的邮箱（全不勾选则观摩仍为全站只读）</label>
+              <div id="admin-new-member-mailbox-checks" style="max-height:160px;overflow:auto;border:1px solid #334155;border-radius:8px;padding:10px"></div>
+            </div>
+            <div style="display:flex;align-items:flex-end;padding-bottom:12px">
+              <button type="button" class="success" onclick="submitNewAdminUser()">添加用户</button>
+            </div>
+          </div>
         </div>
-        <div>
-          <label>初始密码</label>
-          <input id="admin-new-pass" type="password" autocomplete="new-password" placeholder="至少设强密码">
-        </div>
-        <div>
-          <label>角色</label>
-          <select id="admin-new-role" onchange="toggleNewMemberMailboxes()"></select>
-        </div>
-        <div style="grid-column:1/-1" id="admin-new-member-mailbox-wrap" class="muted small" hidden>
-          <label style="margin-bottom:6px;display:block">新建组员时勾选的负责邮箱（每邮箱全局仅绑定一人）</label>
-          <div id="admin-new-member-mailbox-checks" style="max-height:160px;overflow:auto;border:1px solid #334155;border-radius:8px;padding:10px"></div>
-        </div>
-        <div style="display:flex;align-items:flex-end;padding-bottom:12px">
-          <button type="button" class="success" onclick="submitNewAdminUser()">添加用户</button>
-        </div>
+        <aside class="role-compare-wrap" aria-label="五种登录角色权限对比">
+          <h4>五种角色差异一览</h4>
+          <div class="table-wrap" style="overflow-x:auto;margin:0 -2px">
+            <table class="role-compare">
+              <thead>
+                <tr>
+                  <th scope="col">对比项</th>
+                  <th scope="col">超级<br>管理员</th>
+                  <th scope="col">业务<br>专员</th>
+                  <th scope="col">组长</th>
+                  <th scope="col">组员</th>
+                  <th scope="col">观摩</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>列表数据范围</td>
+                  <td>全站</td>
+                  <td>全站</td>
+                  <td>本组管辖邮箱</td>
+                  <td>已绑定邮箱</td>
+                  <td>默认全站只读；可选绑定邮箱后仅限这些邮箱</td>
+                </tr>
+                <tr>
+                  <td>全局轮询启停</td>
+                  <td class="ok">✓</td>
+                  <td class="ok">✓</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>「小组与邮箱」</td>
+                  <td class="ok">✓</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>本页账号管理</td>
+                  <td class="ok">✓</td>
+                  <td class="ok">✓</td>
+                  <td class="ok">✓</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>分配「超管」角色</td>
+                  <td class="ok">✓</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>日常业务写入（邮箱/产品/内部名单等）</td>
+                  <td class="ok">✓</td>
+                  <td class="ok">✓</td>
+                  <td class="partial">✓<span class="muted" style="font-weight:400"> 限范围</span></td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>全站批量清空 / 整库重置</td>
+                  <td class="ok">✓</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                  <td class="no">—</td>
+                </tr>
+                <tr>
+                  <td>拉信开关 / 人工结案</td>
+                  <td class="ok">✓</td>
+                  <td class="ok">✓</td>
+                  <td class="partial">✓ 限范围</td>
+                  <td class="partial">✓ 限绑定</td>
+                  <td class="no">—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </aside>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap" style="margin-top:8px">
         <table class="tbl">
-          <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>负责邮箱</th><th>状态</th><th>创建时间</th><th>新密码</th><th>操作</th></tr></thead>
+          <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>绑定邮箱范围<br><span style="font-weight:600;font-size:11px;color:var(--text-muted,inherit)">组员=负责收件箱 · 观摩=只读范围</span></th><th>状态</th><th>创建时间</th><th>新密码</th><th>操作</th></tr></thead>
           <tbody id="admin-user-rows"><tr><td colspan="8" class="empty">加载中…</td></tr></tbody>
         </table>
       </div>
@@ -489,7 +754,7 @@ body:not(.super-admin) .need-super-admin{display:none!important}
   <section id="tab-teams" class="panel need-super-admin">
     <div class="box">
       <h3 style="margin-bottom:8px">小组与管辖邮箱</h3>
-      <p class="muted" style="margin:0 0 16px;font-size:12px"><strong>本页做两件事：</strong>定小组（名称 + 组长账号）+ 勾选本组<strong>管辖邮箱池</strong>。谁当<strong>组员</strong>、组员绑定哪几个邮箱，在「账号管理」里把角色设为<strong>组员</strong>并勾选邮箱（组长也可在已管辖范围内帮组员改绑定）。同一物理邮箱同时只属于一个小组、至多绑定一名组员。</p>
+      <p class="muted" style="margin:0 0 16px;font-size:12px"><strong>本页做两件事：</strong>定小组（名称 + 组长账号）+ 勾选本组<strong>管辖邮箱池</strong>。组员或观摩绑定哪几个邮箱在「账号管理」中配置（组长可在已管辖范围内协助指派）。同一物理邮箱同时只属于一个小组、且在用户绑定表中至多对应一名组员或观摩账号。</p>
       <div class="two-col" style="max-width:640px;margin-bottom:16px">
         <div>
           <label>小组名称</label>
@@ -500,7 +765,7 @@ body:not(.super-admin) .need-super-admin{display:none!important}
           <select id="team-new-lead" style="margin-bottom:4px">
             <option value="">请选择…</option>
           </select>
-          <p class="muted small" style="margin:0 0 8px">下列列表优先排<strong>组长</strong>角色；若选了其他角色，请随后在「账号管理」改为组长。</p>
+          <p class="muted small" style="margin:0 0 8px">仅列出「角色 = 组长」的账号；若下拉为空，请先在「账号管理」将某用户设为组长。</p>
         </div>
         <div style="display:flex;align-items:flex-end;padding-bottom:12px">
           <button type="button" class="success" onclick="submitNewTeam()">新建小组</button>
@@ -532,12 +797,12 @@ body:not(.super-admin) .need-super-admin{display:none!important}
 
   <div id="member-mailbox-modal" class="modal-overlay" hidden onclick="if(event.target===this)closeMemberMailboxModal()">
     <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="member-mb-modal-title" onclick="event.stopPropagation()">
-      <h3 id="member-mb-modal-title">绑定组员负责邮箱</h3>
-      <p class="muted small" style="margin:0 0 10px">勾选该组员要处理的收件箱；须归属某小组的管辖范围（组长登录时下列表已自动限定为本组邮箱）。每个邮箱全局最多绑定一名组员。</p>
+      <h3 id="member-mb-modal-title">绑定邮箱范围</h3>
+      <p class="muted small" style="margin:0 0 10px"><strong>组员</strong>：勾选负责的收件箱；<strong>观摩</strong>：勾选后仅能只读查阅这些邮箱（若不选则仍可全站只读）。管理员登录时指派规则不变；组长仅能选本小组已管辖邮箱。每张邮箱在用户绑定表中至多对应一名账号。</p>
       <label class="muted small" for="member-mb-filter" style="margin-bottom:6px">筛选（名称、邮箱、ID）</label>
       <input type="search" id="member-mb-filter" placeholder="输入关键词…" autocomplete="off" oninput="applyMemberMbModalFilter()">
       <div id="member-mb-checks" class="team-mb-check-scroll"></div>
-      <p class="muted small" style="margin:0">取消全选并保存可清空该组员绑定。</p>
+      <p class="muted small" style="margin:0">取消全部勾选并保存可清空绑定（组员将无收件箱权限；观摩将恢复为不限邮箱只读）。</p>
       <div class="esc-edit-actions" style="margin-top:14px">
         <button type="button" class="secondary" onclick="closeMemberMailboxModal()">取消</button>
         <button type="button" class="success" onclick="saveMemberMailboxModal()">保存</button>
@@ -545,7 +810,111 @@ body:not(.super-admin) .need-super-admin{display:none!important}
     </div>
   </div>
 
-  <section id="tab-logs" class="panel">
+  <section id="tab-mock" class="panel sandbox-tab">
+    <div class="grid">
+      <div class="box sandbox-panel">
+        <h3>流程沙箱</h3>
+        <p class="sandbox-lead">在这里用<strong>一封虚构的客户邮件</strong>走一遍与生产环境相同的分析、话术与升级判断链路。<strong>不会</strong>写入真实会话、<strong>不会</strong>向客户或负责人发信。</p>
+
+        <div class="sandbox-block">
+          <h4>① 选择邮箱上下文</h4>
+          <p class="sandbox-hint">与「产品库」里挂在该邮箱上的关键词一致，用于模拟匹配产品；请选真实存在的邮箱账户。</p>
+          <label for="mock-mailbox-id">邮箱账户</label>
+          <select id="mock-mailbox-id"></select>
+        </div>
+
+        <div class="sandbox-block">
+          <h4>② 填写模拟客户</h4>
+          <p class="sandbox-hint">至少填写客户邮箱与来信正文，即可推演。</p>
+          <div class="two-col">
+            <div><label for="mock-from-email">客户邮箱</label><input id="mock-from-email" type="email" autocomplete="off" placeholder="例：buyer@example.com"></div>
+            <div><label for="mock-from-name">称呼（可选）</label><input id="mock-from-name" autocomplete="off" placeholder="例：Amy"></div>
+          </div>
+          <label for="mock-subject">主题（可选）</label>
+          <input id="mock-subject" autocomplete="off" placeholder="例：关于订单问题">
+          <label for="mock-body">来信正文</label>
+          <textarea id="mock-body" rows="8" placeholder="在此粘贴或编写客户要说的内容…"></textarea>
+        </div>
+
+        <div class="sandbox-block" style="border-bottom:none;padding-bottom:8px;margin-bottom:12px">
+          <h4>③ 指定产品（可选）</h4>
+          <p class="sandbox-hint">留空则按该邮箱下产品关键词自动匹配；若需固定某条产品可填写 ID。</p>
+          <label for="mock-product-id">产品 ID</label>
+          <input id="mock-product-id" list="mock-product-list" autocomplete="off" placeholder="留空 = 自动匹配">
+          <datalist id="mock-product-list"></datalist>
+        </div>
+
+        <div class="sandbox-run-wrap">
+          <button type="button" class="success" onclick="runMockInbound(this)">开始推演</button>
+        </div>
+
+        <details class="sandbox-advanced">
+          <summary>高级选项（多轮记忆、会话键、历史 JSON）</summary>
+          <div class="sandbox-adv-inner">
+            <p class="muted small" style="margin:0 0 12px;line-height:1.55">以下为<strong>可选</strong>能力：默认每次测试互不干扰。只有需要「同一槽里多轮假扮客户 / 假扮客服」连续演练时，再勾选记忆；与真实业务库无关。要<strong>清空本轮槽内记录并重新测</strong>，点下方「清空本条记忆」即可。</p>
+            <div class="two-col">
+              <div>
+                <label for="mock-memory-slot">记忆槽名称</label>
+                <input id="mock-memory-slot" autocomplete="off" value="default" placeholder="default">
+              </div>
+              <div>
+                <label for="mock-thread-key">沙箱会话键（可选）</label>
+                <input id="mock-thread-key" placeholder="留空则每次随机">
+              </div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:8px 0 12px">
+              <label style="margin:0;display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="mock-use-memory"> 推演时载入本槽已有记忆（多轮用）</label>
+              <label style="margin:0;display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="mock-persist-memory"> 推演后将本轮写入本槽记忆（多轮用）</label>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+              <button type="button" class="secondary small" onclick="loadMockMemoryPreview()">刷新记忆预览</button>
+              <button type="button" class="danger small" onclick="clearMockMemory()">清空本条记忆</button>
+            </div>
+            <span class="muted small" style="display:block;margin-bottom:6px">当前记忆预览（只读）</span>
+            <pre id="mock-memory-preview" style="white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.5;background:#0f172a;border:1px solid #334155;border-radius:10px;padding:10px;margin:0 0 14px;color:#94a3b8;max-height:180px;overflow:auto">（选择邮箱并展开本区域后可刷新）</pre>
+            <label for="mock-prior-json">附加对话 JSON（可选）</label>
+            <p class="sandbox-hint" style="margin-top:-6px">接在服务端记忆之后追加；角色名用 <code>kol</code> 表示客户，<code>our</code> 或 <code>客服</code> 表示我方。</p>
+            <textarea id="mock-prior-json" rows="5" placeholder='[{"role":"kol","body":"上一封..."},{"role":"our","body":"我方曾回复..."}]'></textarea>
+          </div>
+        </details>
+      </div>
+      <div class="box sandbox-output-box">
+        <h3>推演结果</h3>
+        <p class="sandbox-out-hint">上方为<strong>按轮次排列的对话预览</strong>（先读这里最直观）；下方可展开「分项原文」便于复制。整块区域可上下滚动。</p>
+        <div id="mock-sentiment-banner" class="sandbox-sentiment-banner" hidden></div>
+        <div id="mock-result-scroller" class="mock-result-scroller" role="region" aria-label="推演结果全文">
+          <p class="sandbox-timeline-head">对话预览（时间顺序）</p>
+          <div id="mock-result-timeline" class="mock-result-timeline" aria-live="polite">
+            <p class="muted small" style="margin:0;line-height:1.65">尚未推演。完成左侧填写后点「开始推演」，若有附加 JSON 会先展示历史轮次，再是本封客户与我方建议。</p>
+          </div>
+          <p id="mock-result-timeline-note" class="sandbox-timeline-footnote" style="display:none"></p>
+          <details class="details-sandbox-copy">
+            <summary>分项原文（可复制英文 / 译文）</summary>
+            <div style="padding:0 8px 14px 14px">
+          <div id="mock-result-prior-wrap" class="mock-thread-section" style="display:none">
+            <div class="mock-thread-label">前文 / 上下文（本次一并参与推演）</div>
+            <div id="mock-result-prior" class="mock-thread-body mock-thread-body-muted is-placeholder"></div>
+          </div>
+          <div class="mock-thread-section">
+            <div class="mock-thread-label">本轮 · 模拟客户来信</div>
+            <div id="mock-result-customer" class="mock-thread-body is-placeholder">推演完成后此处会复述您在左侧填写的内容。</div>
+          </div>
+          <div class="mock-thread-section">
+            <div class="mock-thread-label">模型 · 建议邮件正文（对客户）</div>
+            <div id="mock-result-mail" class="mock-thread-body is-placeholder">推演完成后在此显示全文。</div>
+          </div>
+          <div class="mock-thread-section">
+            <div class="mock-thread-label">中文参考译文</div>
+            <div id="mock-result-zh" class="mock-thread-body mock-result-zh is-placeholder"></div>
+          </div>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-logs" class="panel hide-for-viewer">
     <div class="box">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
         <h3>运行日志</h3>
@@ -577,8 +946,12 @@ const ROLE_LABEL_LONG={
   operator:'业务专员 · 全站各邮箱可处理（不按邮箱限范围）',
   team_lead:'组长 · 本组管辖邮箱与组员',
   team_member:'组员 · 仅已绑定邮箱（只读）',
-  viewer:'观摩 · 全站只读',
+  viewer:'观摩 · 只读；未绑邮箱则全站可查，绑定 user_mailboxes 后仅限这些邮箱',
 };
+function roleUsesMailboxScopeBindings(role){
+  const r=String(role||'').trim();
+  return r==='team_member'||r==='viewer';
+}
 function roleLabelShort(code){return ROLE_LABEL_SHORT[String(code||'')]||String(code||'—');}
 function roleLabelLong(code){return ROLE_LABEL_LONG[String(code||'')]||String(code||'—');}
 function htmlRoleSelectOptions(selected){
@@ -868,14 +1241,17 @@ async function loadMailboxAccounts(){
     const tbody=document.getElementById('mailbox-rows');
     if(tbody){
       const rows=window._mailboxList;
-      if(!rows.length){tbody.innerHTML='<tr><td colspan="6" class="empty">暂无邮箱，请在左侧添加</td></tr>';}
+      if(!rows.length){tbody.innerHTML='<tr><td colspan="7" class="empty">暂无邮箱，请在左侧添加</td></tr>';}
       else{
         tbody.innerHTML=rows.map(m=>{
           const chk=m.enabled?'<span class="pill satisfied">是</span>':'<span class="pill not-escalated">否</span>';
+          const pollOn=m.poll_enabled!==false&&m.poll_enabled!==0;
+          const pollPill=pollOn?'<span class="pill satisfied">开</span>':'<span class="pill not-escalated">停</span>';
+          const pollBtn='<span class="need-mailbox-poll-toggle"><button type="button" class="secondary small" onclick="setMailboxPollEnabled('+m.id+','+(!pollOn)+',this)">'+(pollOn?'暂停本邮箱拉信':'开启本邮箱拉信')+'</button></span>';
           const lc=(m.last_checked_at||'').slice(0,16);
           const err=(m.last_error||'').trim();
           const st=err?('<span class="muted" style="color:#fca5a5">'+esc(err.slice(0,80))+'</span>'):(lc||'—');
-          return '<tr><td class="muted">'+m.id+'</td><td><strong>'+esc(m.label||'')+'</strong><div class="muted small">'+esc(m.email_address||'')+'</div></td><td class="muted small">'+esc(m.imap_host||'')+':'+esc(String(m.imap_port||''))+'</td><td>'+chk+'</td><td class="small">'+esc(lc||'')+(lc?'<br>':'')+st+'</td><td><button type="button" class="secondary small need-op" onclick="editMailboxRow('+m.id+')">编辑</button> <button type="button" class="secondary small need-op" onclick="testMailboxRow('+m.id+',this)">测试</button> <button type="button" class="danger small need-op" onclick="deleteMailboxRow('+m.id+')">删除</button></td></tr>';
+          return '<tr><td class="muted">'+m.id+'</td><td><strong>'+esc(m.label||'')+'</strong><div class="muted small">'+esc(m.email_address||'')+'</div></td><td class="muted small">'+esc(m.imap_host||'')+':'+esc(String(m.imap_port||''))+'</td><td>'+chk+'</td><td class="small">'+pollPill+pollBtn+'</td><td class="small">'+esc(lc||'')+(lc?'<br>':'')+st+'</td><td><button type="button" class="secondary small need-op" onclick="editMailboxRow('+m.id+')">编辑</button> <button type="button" class="secondary small need-op" onclick="testMailboxRow('+m.id+',this)">测试</button> <button type="button" class="danger small need-op" onclick="deleteMailboxRow('+m.id+')">删除</button></td></tr>';
         }).join('');
       }
     }
@@ -942,6 +1318,7 @@ function clearMailboxForm(){
   document.getElementById('mb-provider').value='aliyun';
   const ssl=document.getElementById('mb-smtp-ssl');if(ssl) ssl.checked=true;
   document.getElementById('mb-enabled').checked=true;
+  const mbp=document.getElementById('mb-poll-enabled');if(mbp) mbp.checked=true;
   document.getElementById('mb-reply-zh').checked=true;
 }
 function editMailboxRow(id){
@@ -958,6 +1335,7 @@ function editMailboxRow(id){
   document.getElementById('mb-smtp-port').value=m.smtp_port!=null?String(m.smtp_port):'465';
   document.getElementById('mb-smtp-ssl').checked=!!m.smtp_use_ssl;
   document.getElementById('mb-enabled').checked=!!m.enabled;
+  const mbp=document.getElementById('mb-poll-enabled');if(mbp) mbp.checked=m.poll_enabled!==false&&m.poll_enabled!==0;
   document.getElementById('mb-reply-zh').checked=!!m.mail_reply_subject_web_style;
   document.getElementById('mb-brand-name').value=m.brand_name||'';
   document.getElementById('mb-brand-sig').value=m.brand_signature||'';
@@ -981,6 +1359,7 @@ async function saveMailboxForm(){
     smtp_port:parseInt(document.getElementById('mb-smtp-port').value,10)||465,
     smtp_use_ssl:document.getElementById('mb-smtp-ssl').checked,
     enabled:document.getElementById('mb-enabled').checked,
+    poll_enabled:document.getElementById('mb-poll-enabled').checked,
     mail_reply_subject_web_style:document.getElementById('mb-reply-zh').checked,
     brand_name:document.getElementById('mb-brand-name').value.trim(),
     brand_signature:document.getElementById('mb-brand-sig').value.trim(),
@@ -1038,13 +1417,410 @@ async function handleRefresh(btn){
   }
 }
 
+function mockMemorySlotValue(){
+  const el=document.getElementById('mock-memory-slot');
+  const v=(el&&el.value||'').trim();
+  return v||'default';
+}
+
+async function loadMockMemoryPreview(){
+  const pre=document.getElementById('mock-memory-preview');
+  const sel=document.getElementById('mock-mailbox-id');
+  if(!pre||!sel) return;
+  const mid=parseInt(sel.value,10);
+  if(!mid||isNaN(mid)){pre.textContent='（请先选择邮箱）';return;}
+  const slot=encodeURIComponent(mockMemorySlotValue());
+  try{
+    const d=await fetchJson('/mock/memory?mailbox_id='+encodeURIComponent(mid)+'&slot='+slot);
+    pre.textContent=JSON.stringify(d.turns||[],null,2);
+  }catch(e){pre.textContent='加载失败: '+(e.message||e);}
+}
+
+async function clearMockMemory(){
+  const sel=document.getElementById('mock-mailbox-id');
+  const mid=parseInt(sel&&sel.value,10);
+  if(!mid||isNaN(mid)){showBanner('请先选择邮箱',false);return;}
+  if(!confirm('清空当前账号在该邮箱与记忆槽下的沙箱对话记录？清空后可重新从第一轮开始演练。')) return;
+  const slot=encodeURIComponent(mockMemorySlotValue());
+  try{
+    await fetchJson('/mock/memory?mailbox_id='+encodeURIComponent(mid)+'&slot='+slot,{method:'DELETE'});
+    await loadMockMemoryPreview();
+    showBanner('已清空沙箱记忆',true);
+  }catch(e){showBanner('清空失败: '+e.message,false);}
+}
+
+function refreshMockSandboxForm(){
+  const sel=document.getElementById('mock-mailbox-id');
+  const dl=document.getElementById('mock-product-list');
+  if(!sel||!dl) return;
+  const mbs=window._mailboxList||[];
+  if(!mbs.length){sel.innerHTML='<option value="">（暂无邮箱）</option>';loadMockMemoryPreview();return;}
+  const cur=sel.value;
+  sel.innerHTML=mbs.map(m=>'<option value="'+String(m.id)+'">'+esc('ID '+m.id+' · '+(m.label||m.email_address||''))+'</option>').join('');
+  if(cur&&mbs.some(x=>String(x.id)===String(cur))) sel.value=cur;
+  dl.innerHTML=(window._allProducts||[]).map(p=>'<option value="'+escAttr(String(p.id||''))+'">').join('');
+  if(sel && !sel._mockMemBound){
+    sel._mockMemBound=true;
+    sel.addEventListener('change',()=>loadMockMemoryPreview());
+  }
+  const ms=document.getElementById('mock-memory-slot');
+  if(ms && !ms._mockMemBound){
+    ms._mockMemBound=true;
+    ms.addEventListener('blur',()=>loadMockMemoryPreview());
+  }
+  const mmMem=document.getElementById('mock-use-memory');
+  if(mmMem && !mmMem._tlNoteBound){
+    mmMem._tlNoteBound=true;
+    mmMem.addEventListener('change',()=>updateSandboxTimelineNote());
+  }
+  const mpj=document.getElementById('mock-prior-json');
+  if(mpj && !mpj._tlNoteBound){
+    mpj._tlNoteBound=true;
+    mpj.addEventListener('blur',()=>updateSandboxTimelineNote());
+  }
+  loadMockMemoryPreview();
+}
+
+function scrollMockResultTop(){
+  const sc=document.getElementById('mock-result-scroller');
+  if(sc) sc.scrollTop=0;
+}
+function normalizeSandboxRole(raw){
+  const x=String(raw==null?'':raw).trim().toLowerCase();
+  if(x==='our'||x==='客服'||x==='support'||x==='agent') return 'our';
+  return 'kol';
+}
+function parseSandboxPriorTurns(){
+  const pj=(document.getElementById('mock-prior-json').value||'').trim();
+  if(!pj) return [];
+  try{
+    const arr=JSON.parse(pj);
+    if(!Array.isArray(arr)) return [];
+    const out=[];
+    for(const item of arr){
+      if(!item||typeof item!=='object') continue;
+      const body=String(item.body||'').trim();
+      if(!body) continue;
+      let role='kol';
+      if(item.is_mine===true||item.is_mine===1||String(item.role||'')==='our_message') role='our';
+      else role=normalizeSandboxRole(item.role);
+      const sj=String(item.subject||'').trim();
+      let sub=sj?('主题：'+sj):'';
+      if(!sub&&(item.order_id||item.sku)){const bits=[]; if(item.order_id) bits.push('订单：'+String(item.order_id)); if(item.sku) bits.push('SKU：'+String(item.sku)); sub=bits.join(' · ');}
+      out.push({role, body, meta:sub});
+    }
+    return out;
+  }catch(_e){
+    return [];
+  }
+}
+function buildSandboxCurrentCustomerTurn(){
+  const sub=(document.getElementById('mock-subject').value||'').trim();
+  const nm=(document.getElementById('mock-from-name').value||'').trim();
+  const em=(document.getElementById('mock-from-email').value||'').trim();
+  const body=(document.getElementById('mock-body').value||'').trim();
+  const parts=[];
+  if(em) parts.push('发件 '+em);
+  if(nm) parts.push('称呼 '+nm);
+  if(sub) parts.push('主题 '+sub);
+  return {role:'kol', body:body||'（正文为空）', meta:parts.join(' · ')};
+}
+function updateSandboxTimelineNote(){
+  const note=document.getElementById('mock-result-timeline-note');
+  if(!note) return;
+  const useMem=!!(document.getElementById('mock-use-memory')&&document.getElementById('mock-use-memory').checked);
+  const hasPri=parseSandboxPriorTurns().length>0;
+  if(useMem && !hasPri){
+    note.style.display='block';
+    note.textContent='已勾选「载入沙箱记忆」时，服务端可能还有若干轮上文未在您填的 JSON 里展示；若要在此时间线里看到每一段，可把记忆导出到「附加对话 JSON」，或仅以本轮 + 下方建议预览为准。';
+  }else{
+    note.style.display='none';
+    note.textContent='';
+  }
+}
+function renderSandboxTimelineHTML(rows){
+  const el=document.getElementById('mock-result-timeline');
+  if(!el) return;
+  if(!rows||!rows.length){
+    el.innerHTML='<p class="muted small" style="margin:0;line-height:1.65">（无可展示的对话条目）</p>';
+    return;
+  }
+  const chunks=[];
+  for(const row of rows){
+    if(row.html){
+      chunks.push(row.html);
+      continue;
+    }
+    const side=row.role==='our'?'sandbox-turn-our':'sandbox-turn-kol';
+    const chip=row.role==='our'?'我方':'客户';
+    const meta=row.meta?('<div class="sandbox-turn-sub">'+row.meta+'</div>'):'';
+    const zh=row.zhAfter?('<div class="sandbox-zh-slot"><span style="opacity:.85">中文参考译文 · </span>'+row.zhAfter+'</div>'):'';
+    chunks.push(
+      '<div class="sandbox-turn '+side+'">'+
+      '<div class="sandbox-turn-chip">'+chip+'</div>'+
+      '<div class="sandbox-turn-body-wrap">'+meta+
+      '<div class="sandbox-turn-body">'+row.body+'</div>'+zh+
+      '</div></div>'
+    );
+  }
+  el.innerHTML=chunks.join('');
+}
+function renderSandboxTimelineLoading(){
+  const prior=parseSandboxPriorTurns();
+  const cust=buildSandboxCurrentCustomerTurn();
+  updateSandboxTimelineNote();
+  const rows=[];
+  for(const p of prior){
+    rows.push({role:p.role, body:esc(p.body), meta:p.meta?esc(p.meta):''});
+  }
+  rows.push({role:'kol', body:esc(cust.body), meta:cust.meta?esc(cust.meta):''});
+  rows.push({
+    html:'<div class="sandbox-turn sandbox-turn-our">'+
+      '<div class="sandbox-turn-chip" style="opacity:.85">···</div>'+
+      '<div class="sandbox-turn-body-wrap">'+
+      '<div class="sandbox-turn-body" style="font-style:italic;color:#94a3b8;border-style:dashed">正在推演 · 生成建议对客户英文与中文参考译文…</div>'+
+      '</div></div>'
+  });
+  renderSandboxTimelineHTML(rows);
+}
+function renderSandboxTimelineFromResults(data, err){
+  updateSandboxTimelineNote();
+  const prior=parseSandboxPriorTurns();
+  const cust=buildSandboxCurrentCustomerTurn();
+  if(err){
+    const rows=[];
+    for(const p of prior){
+      rows.push({
+        role:p.role,
+        body:esc(p.body),
+        meta:p.meta?esc(p.meta):'',
+      });
+    }
+    rows.push({role:'kol', body:esc(cust.body), meta:cust.meta?esc(cust.meta):''});
+    rows.push({
+      html:'<div class="sandbox-turn" style="margin-top:18px">'+
+      '<div class="sandbox-turn-chip" style="background:rgba(239,68,68,0.12);color:#f87171;border-color:rgba(248,113,113,0.4)">提示</div>'+
+      '<div class="sandbox-turn-body-wrap"><div class="sandbox-turn-body" style="border-color:#7f1d1d;color:#fecaca">推演失败 · '+esc(String(err||''))+'</div></div></div>'
+    });
+    renderSandboxTimelineHTML(rows);
+    return;
+  }
+  const reply=((data&&data.suggested_reply)||'').trim();
+  const zhRaw=((data&&data.suggested_reply_zh)||'').trim();
+  const rows=[];
+  for(const p of prior){
+    rows.push({role:p.role, body:esc(p.body), meta:p.meta?esc(p.meta):''});
+  }
+  rows.push({role:'kol', body:esc(cust.body), meta:cust.meta?esc(cust.meta):''});
+  let zhEsc='';
+  if(zhRaw) zhEsc=esc(zhRaw);
+  else if(reply && mockReplyLooksMostlyChinese(reply)) zhEsc=esc('（正文以中文为主，未再调用翻译）');
+  else if(reply) zhEsc=esc('（暂未生成译文，请检查 LLM 配置与网络）');
+  if(reply){
+    rows.push({
+      role:'our',
+      body:esc(reply),
+      meta:'',
+      zhAfter:zhEsc,
+    });
+  }else{
+    rows.push({
+      role:'our',
+      body:esc('（本轮无模型建议对外正文；安抚类可能先只做内部工单，请参阅日志或分项区）'),
+      meta:'',
+      zhAfter:zhEsc,
+    });
+  }
+  renderSandboxTimelineHTML(rows);
+}
+function buildSandboxCustomerEcho(){
+  const em=(document.getElementById('mock-from-email').value||'').trim();
+  const nm=(document.getElementById('mock-from-name').value||'').trim();
+  const sub=(document.getElementById('mock-subject').value||'').trim();
+  const body=(document.getElementById('mock-body').value||'').trim();
+  const lines=[];
+  lines.push('发件人：'+(em||'（未填）'));
+  if(nm) lines.push('称呼：'+nm);
+  if(sub) lines.push('主题：'+sub);
+  lines.push('');
+  lines.push(body||'（正文为空）');
+  return lines.join('\n');
+}
+function buildSandboxPriorSection(){
+  const wrap=document.getElementById('mock-result-prior-wrap');
+  const el=document.getElementById('mock-result-prior');
+  if(!wrap||!el) return;
+  const pj=(document.getElementById('mock-prior-json').value||'').trim();
+  const useMem=!!(document.getElementById('mock-use-memory')&&document.getElementById('mock-use-memory').checked);
+  const parts=[];
+  if(useMem){
+    parts.push('· 本次已在服务端合并「沙箱对话记忆」（当前邮箱 + 记忆槽）。左侧「高级选项 → 刷新记忆预览」可看完整 JSON 轮次。');
+  }
+  if(pj){
+    let pretty=pj;
+    try{pretty=JSON.stringify(JSON.parse(pj),null,2);}catch(e){}
+    if(parts.length) parts.push('');
+    parts.push('· 以下为附加 prior_messages（接在服务端记忆之后）：');
+    parts.push('');
+    parts.push(pretty);
+  }
+  const txt=parts.join('\n').trim();
+  if(txt){
+    wrap.style.display='block';
+    el.textContent=txt;
+    el.classList.remove('is-placeholder');
+  }else{
+    wrap.style.display='none';
+    el.textContent='';
+    el.classList.add('is-placeholder');
+  }
+}
+function mockReplyLooksMostlyChinese(s){
+  if(!s||typeof s!=='string') return false;
+  const t=s.slice(0,600);
+  if(t.length<40) return false;
+  let cjk=0;
+  for(let i=0;i<t.length;i++){
+    const c=t.charCodeAt(i);
+    if(c>=0x4e00&&c<=0x9fff) cjk++;
+  }
+  return cjk/t.length>=0.52;
+}
+function updateMockSentimentBanner(data, err){
+  const el=document.getElementById('mock-sentiment-banner');
+  if(!el) return;
+  if(err||!data){
+    el.hidden=true;
+    el.innerHTML='';
+    return;
+  }
+  const s=String(data.sentiment||'neutral');
+  const t=String(data.tone||'cooperative');
+  const ar=String(data.analysis_reason||'').trim();
+  const esc_=!!data.escalated;
+  const rec=!!data.escalate_recommended;
+  const reason=ar?'<div class="muted" style="width:100%;margin-top:6px;font-size:12px;line-height:1.55;border-top:1px solid rgba(51,65,85,0.6);padding-top:8px"><strong style="color:#94a3b8;">识别摘要：</strong> '+esc(ar)+'</div>':'';
+  const suggestRec=(!esc_&&rec)?'<span class="pill dissatisfied" style="margin:0;opacity:.9">模型建议升级</span>':'';
+  el.innerHTML=
+    '<span class="pill '+esc(s)+'" style="margin:0">情绪 '+esc(s)+'</span>'+
+    '<span class="pill '+esc(t)+'" style="margin:0">语气 '+esc(t)+'</span>'+
+    '<span class="pill '+(esc_?'escalated':'')+'" style="margin:0">'+(esc_?'本次已触发升级链路':'本次未触发升级')+'</span>'+
+    suggestRec+
+    '<div class="muted small" style="width:100%;margin-top:2px;line-height:1.5">沙箱<strong>不写</strong>「客诉分析」列表数据；以上为接口返回的本轮检测结果。</div>'+
+    reason;
+  el.hidden=false;
+}
+function renderMockSandboxResult(data,err){
+  const mailEl=document.getElementById('mock-result-mail');
+  const zhEl=document.getElementById('mock-result-zh');
+  const custEl=document.getElementById('mock-result-customer');
+  if(!mailEl||!zhEl||!custEl) return;
+  const setPh=(el,on)=>{el.classList.toggle('is-placeholder',!!on);};
+  scrollMockResultTop();
+  buildSandboxPriorSection();
+  custEl.textContent=buildSandboxCustomerEcho();
+  custEl.classList.remove('is-placeholder');
+  setPh(custEl,false);
+  if(err){
+    mailEl.textContent='（推演失败） '+err;
+    setPh(mailEl,true);
+    zhEl.textContent='';
+    setPh(zhEl,true);
+    renderSandboxTimelineFromResults(null, err);
+    updateMockSentimentBanner(null, err);
+    return;
+  }
+  const reply=(data&&data.suggested_reply)||'';
+  const zhRaw=(data&&data.suggested_reply_zh)||'';
+  const hasReply=!!reply.trim();
+  mailEl.textContent=hasReply?reply:'（本次无建议回复正文）';
+  setPh(mailEl,!hasReply);
+  if(zhRaw.trim()){
+    zhEl.textContent=zhRaw.trim();
+    setPh(zhEl,false);
+  }else if(mockReplyLooksMostlyChinese(reply)){
+    zhEl.textContent='（正文以中文为主，未再调用翻译。）';
+    setPh(zhEl,true);
+  }else if(hasReply){
+    zhEl.textContent='（暂未生成译文，请检查 LLM 配置与网络后重试本轮推演。）';
+    setPh(zhEl,true);
+  }else{
+    zhEl.textContent='';
+    setPh(zhEl,true);
+  }
+  renderSandboxTimelineFromResults(data, null);
+  updateMockSentimentBanner(data, null);
+}
+
+async function runMockInbound(btn){
+  const old=btn&&btn.textContent;
+  const sel=document.getElementById('mock-mailbox-id');
+  if(btn) btn.disabled=true;
+  try{
+    const midRaw=sel&&sel.value?parseInt(sel.value,10):NaN;
+    if(!midRaw||isNaN(midRaw)){showBanner('请选择邮箱账户',false);return;}
+    let prior=[];
+    const pj=(document.getElementById('mock-prior-json').value||'').trim();
+    if(pj){
+      try{ prior=JSON.parse(pj); }
+      catch(_e){ showBanner('prior_messages 不是合法 JSON',false); return; }
+      if(!Array.isArray(prior)){ showBanner('prior_messages 须为数组',false); return; }
+    }
+    const mailEl=document.getElementById('mock-result-mail');
+    const zhEl=document.getElementById('mock-result-zh');
+    scrollMockResultTop();
+    buildSandboxPriorSection();
+    const custEl=document.getElementById('mock-result-customer');
+    if(custEl){
+      custEl.classList.remove('is-placeholder');
+      custEl.textContent=buildSandboxCustomerEcho();
+    }
+    if(mailEl){
+      mailEl.classList.remove('is-placeholder');
+      mailEl.textContent='正在推演… 分项正文见下方可复制区.';
+    }
+    if(zhEl){
+      zhEl.textContent='';
+      zhEl.classList.add('is-placeholder');
+    }
+    const ban=document.getElementById('mock-sentiment-banner');
+    if(ban){ ban.hidden=true; ban.innerHTML=''; }
+    renderSandboxTimelineLoading();
+    const useMemEl=document.getElementById('mock-use-memory');
+    const persistEl=document.getElementById('mock-persist-memory');
+    const body={
+      mailbox_id:midRaw,
+      thread_key:(document.getElementById('mock-thread-key').value||'').trim()||null,
+      from_email:(document.getElementById('mock-from-email').value||'').trim(),
+      from_name:(document.getElementById('mock-from-name').value||'').trim(),
+      subject:(document.getElementById('mock-subject').value||'').trim(),
+      body:document.getElementById('mock-body').value,
+      prior_messages:prior,
+      use_conversation_memory:!!(useMemEl&&useMemEl.checked),
+      persist_conversation_memory:!!(persistEl&&persistEl.checked),
+      memory_slot:mockMemorySlotValue(),
+    };
+    const pid=(document.getElementById('mock-product-id').value||'').trim();
+    if(pid) body.product_id=pid;
+    const data=await fetchJson('/mock/inbound',{method:'POST',body:JSON.stringify(body)});
+    renderMockSandboxResult(data);
+    showBanner('沙箱推演完成',true);
+    await loadMockMemoryPreview();
+  }catch(err){
+    renderMockSandboxResult(null,err.message||String(err));
+    showBanner(err.message||'沙箱失败',false);
+  }finally{if(btn){btn.disabled=false;if(old) btn.textContent=old;}}
+}
+
 function switchTab(name,btn){
   document.querySelectorAll('.panel').forEach(el=>el.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(el=>el.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   btn.classList.add('active');
   if(name==='teams') populateTeamLeadSelect();
+  if(name==='mock') refreshMockSandboxForm();
 }
+
 function splitList(text){
   return String(text||'').split(',').map(v=>v.trim()).filter(Boolean);
 }
@@ -1055,7 +1831,13 @@ function escOwnerDisplay(email){
 }
 async function loadStatus(){
   const data=await fetchJson('/status');
-  document.getElementById('sum-running').textContent=data.auto_polling?'运行中':'已停止';
+  const running=!!data.auto_polling;
+  document.getElementById('sum-running').textContent=running?'运行中':'已停止';
+  const pollCard=document.getElementById('stat-poll-card');
+  if(pollCard){
+    pollCard.classList.toggle('is-running',running);
+    pollCard.classList.toggle('is-stopped',!running);
+  }
   const s=data.summary||{};
   document.getElementById('sum-products').textContent=s.products??0;
   const handlerEl=document.getElementById('sum-handlers');
@@ -1070,9 +1852,13 @@ async function loadStatus(){
 
 async function loadInbox(){
   const mf=document.getElementById('mailbox-filter');
-  if(mf && !window._memberMailboxLocked && window._currentUser && window._currentUser.role==='team_member' && (window._authMailboxIds||[]).length===1){
-    window._memberMailboxLocked=true;
-    mf.value=String(window._authMailboxIds[0]);
+  if(mf && !window._scopedMailboxLocked && window._currentUser){
+    const r=window._currentUser.role||'';
+    const ids=window._authMailboxIds||[];
+    if(roleUsesMailboxScopeBindings(r)&&ids.length===1){
+      window._scopedMailboxLocked=true;
+      mf.value=String(ids[0]);
+    }
   }
   const mb=mf&&mf.value?String(mf.value).trim():'';
   const qs=mb?('?mailbox_id='+encodeURIComponent(mb)):'';
@@ -1091,15 +1877,19 @@ async function loadInbox(){
   const threads=threadsData.kols||[];
   if(!threads.length){threadEl.innerHTML='<div class="empty">暂无客户会话</div>';}
   else{
-    threadEl.innerHTML=threads.slice(0,30).map(row=>`
+    threadEl.innerHTML=threads.slice(0,30).map(row=>{
+      const done=Number(row.manual_handoff_completed)===1;
+      const badge=done?'<span class="pill escalated" style="margin-left:8px">已人工结案 · 不收自动回复</span>':'';
+      return `
       <div class="item thread-item" data-tid-enc="${encodeURIComponent(row.thread_id)}">
         <div class="item-head">
           <div>
-            <div><strong>${esc(row.kol_name||row.kol_email)}</strong></div>
+            <div><strong>${esc(row.kol_name||row.kol_email)}</strong>${badge}</div>
             <div class="muted">${esc(row.kol_email||'')} · ${esc(row.intent_label||'未分析')}</div>
           </div>
           <div class="draft-actions" style="margin-top:0">
             <button type="button" class="secondary small thread-toggle-btn" data-tid="${encodeURIComponent(row.thread_id)}" onclick="toggleThread(this)">查看来信</button>
+            <button type="button" class="secondary small need-thread-handoff" data-tid-enc="${encodeURIComponent(row.thread_id)}" data-done="${done?1:0}" onclick="threadManualHandoffClick(this)">${done?'恢复自动回复':'确认已人工处理完'}</button>
             <button type="button" class="danger small need-op" onclick="deleteOneThreadFromBtn(this)">删除会话</button>
           </div>
         </div>
@@ -1107,7 +1897,7 @@ async function loadInbox(){
         <div class="muted" style="margin-top:2px">最后更新: ${esc((row.updated_at||'').slice(0,16))}</div>
         <div class="thread-detail-panel" aria-live="polite"></div>
       </div>
-    `).join('');
+    `}).join('');
   }
 
   // Intent preview (latest 5)
@@ -1132,6 +1922,32 @@ async function loadInbox(){
       </div>
     `).join('');
   }
+}
+
+async function threadManualHandoffClick(btn){
+  const enc=btn&&btn.getAttribute('data-tid-enc');
+  const done=btn&&btn.getAttribute('data-done')==='1';
+  if(!enc) return;
+  const next=!done;
+  const threadId=decodeURIComponent(enc);
+  const msg=next?'确认该会话已由人工处理完毕？后续客户来信将只归档、不自动回复。':'恢复该会话的自动分析与回复？';
+  if(!confirm(msg)) return;
+  try{
+    await fetchJson('/thread/'+encodeURIComponent(threadId)+'/manual-handoff',{method:'PATCH',body:JSON.stringify({manual_handoff_completed:next})});
+    showBanner(next?'已标记人工结案':'已恢复自动回复',true);
+    await loadInbox();
+  }catch(err){showBanner('操作失败: '+err.message,false);}
+}
+
+async function setMailboxPollEnabled(mid,on,btn){
+  const old=btn&&btn.textContent;
+  if(btn) btn.disabled=true;
+  try{
+    await fetchJson('/mailboxes/'+encodeURIComponent(mid)+'/poll',{method:'PUT',body:JSON.stringify({poll_enabled:!!on})});
+    showBanner(on?'已开启该邮箱自动拉信':'已暂停该邮箱自动拉信',true);
+    await loadMailboxAccounts();
+  }catch(err){showBanner('操作失败: '+err.message,false);}
+  finally{if(btn){btn.disabled=false;if(old)btn.textContent=old;}}
 }
 
 function renderThreadMessages(messages){
@@ -1510,7 +2326,7 @@ function toggleNewMemberMailboxes(){
   const r=document.getElementById('admin-new-role');
   const w=document.getElementById('admin-new-member-mailbox-wrap');
   if(!r||!w) return;
-  w.hidden=(r.value!=='team_member');
+  w.hidden=!roleUsesMailboxScopeBindings(r.value);
 }
 function rebuildAdminNewMemberMailboxChecks(){
   const host=document.getElementById('admin-new-member-mailbox-checks');
@@ -1519,28 +2335,30 @@ function rebuildAdminNewMemberMailboxChecks(){
   if(!rows.length){host.innerHTML='<span class="muted">请先在「邮箱账户」添加邮箱</span>';return;}
   host.innerHTML=rows.map(m=>'<label style="display:block;margin:4px 0;font-size:13px"><input type="checkbox" class="admin-new-mb-cb" value="'+m.id+'"> '+esc(m.label||m.email_address||m.id)+' <span class="muted">'+esc(m.email_address||'')+'</span></label>').join('');
 }
-function _roleOrderForLeadSelect(r){
-  const o={team_lead:0,admin:1,operator:2,team_member:3,viewer:4};
-  const k=String(r||'');
-  return o[k]!==undefined?o[k]:9;
-}
 function populateTeamLeadSelect(){
   const sel=document.getElementById('team-new-lead');
   if(!sel) return;
-  const rows=[...(window._adminUsersCache||[])];
+  const rows=(window._adminUsersCache||[]).filter(u=>String(u.role||'')==='team_lead');
   rows.sort((a,b)=>{
-    const d=_roleOrderForLeadSelect(a.role)-_roleOrderForLeadSelect(b.role);
-    if(d!==0) return d;
+    const act=(x)=>Number(x.is_active)?1:0;
+    const da=act(a)-act(b);
+    if(da!==0) return -da;
     return String(a.username||'').localeCompare(String(b.username||''),'zh');
   });
   const prev=sel.value;
-  const parts=['<option value="">请选择组长账号…</option>'];
-  for(const u of rows){
-    const inactive=Number(u.is_active)?'':' · 已停用';
-    parts.push('<option value="'+escAttr(String(u.id))+'">'+esc(u.username||('用户'+u.id))+' · '+esc(roleLabelShort(u.role))+' · #'+u.id+inactive+'</option>');
+  const parts=[];
+  if(!rows.length){
+    parts.push('<option value="">（暂无组长账号，请先在「账号管理」设角色为组长）</option>');
+  }else{
+    parts.push('<option value="">请选择组长账号…</option>');
+    for(const u of rows){
+      const active=Number(u.is_active);
+      const inactive=active?'':' · 已停用';
+      parts.push('<option value="'+escAttr(String(u.id))+'"'+(active?'':' disabled')+'>'+esc(u.username||('用户'+u.id))+' · #'+u.id+inactive+'</option>');
+    }
   }
   sel.innerHTML=parts.join('');
-  if(prev&&[...sel.options].some(o=>o.value===String(prev))) sel.value=String(prev);
+  if(prev&&[...sel.options].some(o=>o.value===String(prev)&&!o.disabled)) sel.value=String(prev);
 }
 function formatLeadUserCell(leadUserId){
   const id=Number(leadUserId);
@@ -1652,8 +2470,8 @@ function closeMemberMailboxModal(){
 }
 function saveMemberMailboxes(uid){
   const u=(window._adminUsersCache||[]).find(x=>Number(x.id)===Number(uid));
-  if(!u||u.role!=='team_member'){
-    showBanner('仅组员可绑定负责邮箱',false);
+  if(!u||!roleUsesMailboxScopeBindings(u.role)){
+    showBanner('仅组员或观摩账号可配置邮箱范围',false);
     return;
   }
   const selected=(u.mailbox_ids||[]).map(Number);
@@ -1672,7 +2490,7 @@ async function saveMemberMailboxModal(){
   try{
     await fetchJson('/auth/users/'+encodeURIComponent(uid)+'/mailboxes',{method:'PUT',body:JSON.stringify({mailbox_ids:ids})});
     closeMemberMailboxModal();
-    showBanner('已绑定邮箱',true);
+    showBanner('已保存邮箱绑定',true);
     await loadAdminUsers();
   }catch(e){
     showBanner('失败: '+e.message,false);
@@ -1717,8 +2535,18 @@ async function loadAll(){
   try{
     await loadStatus();
     await loadMailboxAccounts();
-    await Promise.all([loadEscalationForm(),loadInbox(),loadEscalations(),loadIntents(),loadSupportStaff(),loadProducts(),loadLogs()]);
     const u=window._currentUser;
+    const isViewer=u&&u.role==='viewer';
+    const isMember=u&&u.role==='team_member';
+    const core=[loadInbox(),loadEscalations(),loadIntents()];
+    if(isViewer){
+      await Promise.all(core);
+    }else{
+      const batch=[...core,loadProducts(),loadLogs()];
+      if(!isMember) batch.push(loadEscalationForm(),loadSupportStaff());
+      await Promise.all(batch);
+      refreshMockSandboxForm();
+    }
     if(u&&(u.role==='admin'||u.role==='team_lead'||u.role==='operator')){
       await loadAdminUsers();
     }
@@ -1749,9 +2577,9 @@ async function loadAdminUsers(){
       const delBtn=Number(myId)===Number(u.id)
         ?'<span class="muted small">当前账号</span>'
         :'<button type="button" class="danger small need-admin" onclick="deleteAdminUser('+u.id+')">删除</button>';
-      const mbsCell=(u.role==='team_member')?formatTeamMailboxCell(u.mailbox_ids||[]):'<span class="muted">—</span>';
-      const bindMb=(u.role==='team_member')
-        ?' <button type="button" class="secondary small need-admin" onclick="saveMemberMailboxes('+u.id+')">绑定邮箱</button>'
+      const mbsCell=roleUsesMailboxScopeBindings(u.role)?formatTeamMailboxCell(u.mailbox_ids||[]):'<span class="muted">—</span>';
+      const bindMb=roleUsesMailboxScopeBindings(u.role)
+        ?' <button type="button" class="secondary small need-admin" onclick="saveMemberMailboxes('+u.id+')">绑定邮箱范围</button>'
         :'';
       return '<tr><td class="muted">'+esc(u.id)+'</td><td>'+esc(u.username)+'</td>'+
         '<td><select class="admin-role-sel" data-uid="'+u.id+'" style="margin:0">'+htmlRoleSelectOptions(u.role)+'</select></td>'+
@@ -1774,7 +2602,7 @@ async function submitNewAdminUser(){
   const r=document.getElementById('admin-new-role').value;
   if(!u||!p){showBanner('请填写用户名与密码',false);return;}
   const body={username:u,password:p,role:r};
-  if(r==='team_member'){
+  if(roleUsesMailboxScopeBindings(r)){
     body.mailbox_ids=[...document.querySelectorAll('.admin-new-mb-cb:checked')].map(cb=>parseInt(cb.value,10));
   }
   try{
@@ -1816,12 +2644,21 @@ async function bootDashboard(){
     const me=await fetchJson('/auth/me');
     window._currentUser={id:me.id,username:me.username,role:me.role,mailbox_ids:me.mailbox_ids||[]};
     window._authMailboxIds=me.mailbox_ids||[];
-    window._memberMailboxLocked=false;
+    window._scopedMailboxLocked=false;
     const el=document.getElementById('auth-user');
-    if(el) el.textContent=(me.username||'')+' · '+roleLabelShort(me.role);
+    if(el){
+      el.textContent=(me.username||'')+' · '+roleLabelShort(me.role);
+      el.title=(me.username||'')+' · '+roleLabelLong(me.role);
+    }
+    document.body.classList.remove('role-admin','role-operator','role-team-lead','role-team-member','role-viewer');
+    document.body.classList.add('role-'+(me.role||'viewer').replace(/_/g,'-'));
     document.body.classList.toggle('viewer-role',me.role==='viewer'||me.role==='team_member');
     document.body.classList.toggle('admin-role',me.role==='admin'||me.role==='operator'||me.role==='team_lead');
     document.body.classList.toggle('super-admin',me.role==='admin');
+    document.body.classList.toggle('global-poll-admin',me.role==='admin'||me.role==='operator');
+    document.body.classList.toggle('mailbox-poll-delegates',['admin','operator','team_lead','team_member'].includes(me.role));
+    document.body.classList.toggle('thread-handoff-delegates',['admin','operator','team_lead','team_member'].includes(me.role));
+    document.body.classList.toggle('sandbox-scope',['admin','operator','team_lead','team_member'].includes(me.role));
   }catch(_e){
     return;
   }
@@ -1835,7 +2672,7 @@ async function bootDashboard(){
 })();
 bootDashboard();
 setInterval(()=>loadStatus().catch(()=>{}),5000);
-setInterval(()=>loadLogs().catch(()=>{}),6000);
+setInterval(()=>{if(window._currentUser&&window._currentUser.role==='viewer')return;loadLogs().catch(()=>{});},6000);
 </script>
 </body>
 </html>

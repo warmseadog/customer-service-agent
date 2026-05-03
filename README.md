@@ -76,7 +76,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 - **入口**：浏览器访问 [`/login`](http://localhost:8000/login)，使用用户名与密码登录；会话保存在 **HttpOnly** Cookie（名称由 `AUTH_SESSION_COOKIE` 配置，默认 `cs_session`），前端 API 请求需携带 Cookie（仪表盘已使用 `credentials: 'include'`）。
 - **首个管理员**：数据库中 **没有任何用户** 时，若 `.env` 设置了 `AUTH_BOOTSTRAP_ADMIN_USER` / `AUTH_BOOTSTRAP_ADMIN_PASSWORD`，进程启动时会自动创建该 **admin** 账号。已有用户后请通过管理员调用 `POST /auth/users` 等方式建号，勿依赖 bootstrap。
-- **角色**：`admin`（全量，含危险批量删除与用户管理）、`operator`（读写业务数据，不含批量删库/删全产品等）、`viewer`（只读；仪表盘上隐藏保存/删除类按钮，**服务端仍会校验**）。管理员登录后可在仪表盘 **「账号管理」** 页新建用户、改角色/启用状态/重置密码、删除用户（不可删除当前登录账号）。
+- **角色**：`admin`（全量，含危险批量删除与用户管理）、`operator`（读写业务数据，不含批量删库/删全产品等）、`viewer`（只读；仪表盘上隐藏保存/删除类按钮。**可选**：为该账号勾选绑定邮箱 → 仅能只读这些数据；若不绑定仍为全站只读）。管理员登录后可在仪表盘 **「账号管理」** 页新建用户、改角色/启用状态/重置密码、删除用户（不可删除当前登录账号）。
 - **HTTPS**：公网部署时由 Nginx/Caddy 等终结 TLS，并设置 `X-Forwarded-Proto: https`（或 `Forwarded`）。生产环境将 **`AUTH_COOKIE_SECURE=true`**，否则浏览器拒绝在 HTTPS 下发送 `Secure` Cookie。本地 HTTP 调试保持 `AUTH_COOKIE_SECURE=false`。
 - **静态页与接口**：`GET /dashboard` 返回仪表盘 HTML（便于未登录时由前端跳转登录）；**所有 JSON API**（除 `POST /auth/login`、公开 `GET /` 等）均需有效会话。
 

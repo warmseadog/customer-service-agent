@@ -442,6 +442,9 @@ def init_db() -> None:
     _ensure_column(conn, "kol_threads", "campaign_id", "INTEGER")
     _ensure_column(conn, "kol_threads", "product_id", "TEXT")
     _ensure_column(conn, "kol_threads", "intent_label", "TEXT")
+    _ensure_column(conn, "kol_threads", "manual_handoff_completed", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "kol_threads", "manual_handoff_at", "TEXT")
+    _ensure_column(conn, "kol_threads", "manual_handoff_by", "INTEGER")
     _ensure_column(conn, "thread_messages", "creator_id", "INTEGER")
     _ensure_column(conn, "thread_messages", "campaign_id", "INTEGER")
     _ensure_column(conn, "thread_messages", "outreach_id", "INTEGER")
@@ -489,6 +492,7 @@ def init_db() -> None:
 
     _migrate_users_table_remove_role_check(conn)
     _init_team_rbac_tables(conn)
+    _init_mock_conversation_memory(conn)
 
     _seed_support_staff_if_needed(conn)
     _seed_products_if_needed(conn)
@@ -582,14 +586,22 @@ def _init_team_rbac_tables(conn: sqlite3.Connection) -> None:
 
 def rbac_mailbox_ids_for_user(user_id: int, role: str) -> frozenset[int] | None:
     """
-    None: 不按邮箱过滤（admin / operator / viewer）。
-    frozenset: 仅限这些 mailbox_id（team_lead / team_member）；空集表示无权限数据。
+    None: 不按邮箱过滤（admin / operator；以及未绑定 user_mailboxes 的 viewer）。
+    frozenset: 仅限这些 mailbox_id（viewer 绑定后 team_member / team_lead）；空集表示无可见数据。
     """
     r = (role or "").strip()
-    if r in ("admin", "operator", "viewer"):
+    if r in ("admin", "operator"):
         return None
     conn = _get_conn()
     try:
+        if r == "viewer":
+            rows = conn.execute(
+                "SELECT mailbox_id FROM user_mailboxes WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+            if rows:
+                return frozenset(int(x["mailbox_id"]) for x in rows)
+            return None
         if r == "team_lead":
             rows = conn.execute(
                 """
@@ -733,6 +745,7 @@ def rbac_set_team_mailboxes(team_id: int, mailbox_ids: list[int]) -> None:
 
 
 def rbac_get_member_mailboxes(user_id: int) -> list[int]:
+    """返回 user_mailboxes 中的 mailbox_id（组员负责邮箱或与观摩可读范围共用同表）。"""
     conn = _get_conn()
     try:
         rows = conn.execute(
@@ -1913,6 +1926,54 @@ def get_thread_state(thread_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def set_thread_manual_handoff(
+    thread_id: str,
+    completed: bool,
+    *,
+    actor_user_id: int | None = None,
+) -> dict | None:
+    """人工结案后不再自动回复客户；新来信仍会写入 thread_messages。"""
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT thread_id FROM kol_threads WHERE thread_id = ?", (thread_id,)
+        ).fetchone()
+        if not row:
+            return None
+        now = _now_iso()
+        if completed:
+            conn.execute(
+                """
+                UPDATE kol_threads SET
+                    manual_handoff_completed = 1,
+                    manual_handoff_at = ?,
+                    manual_handoff_by = ?,
+                    updated_at = ?
+                WHERE thread_id = ?
+                """,
+                (now, actor_user_id, now, thread_id),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE kol_threads SET
+                    manual_handoff_completed = 0,
+                    manual_handoff_at = NULL,
+                    manual_handoff_by = NULL,
+                    updated_at = ?
+                WHERE thread_id = ?
+                """,
+                (now, thread_id),
+            )
+        conn.commit()
+        out = conn.execute(
+            "SELECT * FROM kol_threads WHERE thread_id = ?", (thread_id,)
+        ).fetchone()
+        return dict(out) if out else None
+    finally:
+        conn.close()
+
+
 def upsert_thread_state(
     thread_id: str,
     kol_email: str,
@@ -1924,6 +1985,7 @@ def upsert_thread_state(
     campaign_id: int | None = None,
     product_id: str | None = None,
     intent_label: str | None = None,
+    mailbox_id: int | None = None,
 ) -> None:
     conn = _get_conn()
     now = _now_iso()
@@ -1931,9 +1993,10 @@ def upsert_thread_state(
         """
         INSERT INTO kol_threads (
             thread_id, kol_email, kol_name, creator_id, campaign_id, product_id,
-            current_stage, intent_label, last_message_id, notes, created_at, updated_at
+            current_stage, intent_label, last_message_id, notes, mailbox_id,
+            created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(thread_id) DO UPDATE SET
             kol_email = excluded.kol_email,
             kol_name = excluded.kol_name,
@@ -1944,6 +2007,7 @@ def upsert_thread_state(
             intent_label = COALESCE(excluded.intent_label, kol_threads.intent_label),
             last_message_id = excluded.last_message_id,
             notes = excluded.notes,
+            mailbox_id = COALESCE(excluded.mailbox_id, kol_threads.mailbox_id),
             updated_at = excluded.updated_at
         """,
         (
@@ -1957,6 +2021,7 @@ def upsert_thread_state(
             intent_label,
             last_message_id,
             notes,
+            int(mailbox_id) if mailbox_id is not None else 1,
             now,
             now,
         ),
@@ -2185,6 +2250,7 @@ def _row_mailbox(row: sqlite3.Row | None) -> dict | None:
     d.pop("password", None)
     d["mail_reply_subject_web_style"] = bool(d.get("mail_reply_subject_web_style", 1))
     d["enabled"] = bool(d.get("enabled", 1))
+    d["poll_enabled"] = bool(d.get("poll_enabled", 1))
     d["smtp_use_ssl"] = bool(d.get("smtp_use_ssl", 1))
     return d
 
@@ -2207,7 +2273,7 @@ def list_mailboxes() -> list[dict]:
 def list_enabled_mailboxes() -> list[dict]:
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT * FROM mailboxes WHERE enabled = 1 ORDER BY id ASC"
+        "SELECT * FROM mailboxes WHERE enabled = 1 AND poll_enabled = 1 ORDER BY id ASC"
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]  # noqa: SIM115
@@ -2227,8 +2293,8 @@ def insert_mailbox(payload: dict) -> dict:
             label, provider, email_address, password,
             imap_host, imap_port, smtp_host, smtp_port, smtp_use_ssl,
             brand_name, brand_signature, sender_display_name, mail_reply_subject_web_style,
-            enabled, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            enabled, poll_enabled, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             (payload.get("label") or "").strip() or email,
@@ -2245,6 +2311,7 @@ def insert_mailbox(payload: dict) -> dict:
             (payload.get("sender_display_name") or "").strip(),
             1 if payload.get("mail_reply_subject_web_style", True) else 0,
             1 if payload.get("enabled", True) else 0,
+            1 if payload.get("poll_enabled", True) else 0,
             now,
             now,
         ),
@@ -2281,6 +2348,9 @@ def update_mailbox(mailbox_id: int, payload: dict) -> dict | None:
     if "enabled" in payload:
         sets.append("enabled = ?")
         vals.append(1 if payload.get("enabled") else 0)
+    if "poll_enabled" in payload:
+        sets.append("poll_enabled = ?")
+        vals.append(1 if payload.get("poll_enabled") else 0)
     if "mail_reply_subject_web_style" in payload:
         sets.append("mail_reply_subject_web_style = ?")
         vals.append(1 if payload.get("mail_reply_subject_web_style") else 0)
@@ -2349,3 +2419,134 @@ def update_mailbox_check_status(
         )
     conn.commit()
     conn.close()
+
+
+def _init_mock_conversation_memory(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mock_conversation_memory (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            mailbox_id INTEGER NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+            slot TEXT NOT NULL DEFAULT 'default',
+            turns_json TEXT NOT NULL DEFAULT '[]',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, mailbox_id, slot)
+        )
+        """
+    )
+
+
+def sanitize_mock_memory_slot(slot: str) -> str:
+    s = (slot or "default").strip() or "default"
+    s = s.replace("\x00", "")
+    if len(s) > 64:
+        s = s[:64]
+    return s
+
+
+def mock_memory_coerce_turn(t: Any) -> dict | None:
+    """与沙箱 prior_messages 条目一致，可供 agent 使用。"""
+    if not isinstance(t, dict):
+        return None
+    role_s = str(t.get("role") or "kol").strip().lower()
+    is_our = role_s in ("our", "ours", "客服", "mine", "support", "staff")
+    return {
+        "role": "our" if is_our else "kol",
+        "subject": str(t.get("subject") or "")[:500],
+        "body": str(t.get("body") or "")[:12000],
+    }
+
+
+def mock_memory_get_turns(user_id: int, mailbox_id: int, slot: str) -> list[dict]:
+    slot = sanitize_mock_memory_slot(slot)
+    conn = _get_conn()
+    row = conn.execute(
+        """
+        SELECT turns_json FROM mock_conversation_memory
+        WHERE user_id = ? AND mailbox_id = ? AND slot = ?
+        """,
+        (int(user_id), int(mailbox_id), slot),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return []
+    raw = _json_loads(row["turns_json"])
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for item in raw:
+        c = mock_memory_coerce_turn(item)
+        if c and (c.get("body") or "").strip():
+            out.append(c)
+    return out
+
+
+def mock_memory_clear(user_id: int, mailbox_id: int, slot: str) -> bool:
+    slot = sanitize_mock_memory_slot(slot)
+    conn = _get_conn()
+    cur = conn.execute(
+        """
+        DELETE FROM mock_conversation_memory
+        WHERE user_id = ? AND mailbox_id = ? AND slot = ?
+        """,
+        (int(user_id), int(mailbox_id), slot),
+    )
+    conn.commit()
+    conn.close()
+    return cur.rowcount > 0
+
+
+def mock_memory_append_after_run(
+    user_id: int,
+    mailbox_id: int,
+    slot: str,
+    *,
+    customer_body: str,
+    customer_subject: str,
+    our_reply: str,
+) -> dict:
+    """推演结束后把本轮「客户信 + 草稿回复」写入记忆；返回 { count, turns }。"""
+    slot = sanitize_mock_memory_slot(slot)
+    new_turns: list[dict] = [
+        {
+            "role": "kol",
+            "subject": (customer_subject or "")[:500],
+            "body": (customer_body or "")[:12000],
+        }
+    ]
+    orp = (our_reply or "").strip()
+    if orp:
+        new_turns.append({"role": "our", "subject": "", "body": orp[:12000]})
+
+    conn = _get_conn()
+    now = _now_iso()
+    row = conn.execute(
+        """
+        SELECT turns_json FROM mock_conversation_memory
+        WHERE user_id = ? AND mailbox_id = ? AND slot = ?
+        """,
+        (int(user_id), int(mailbox_id), slot),
+    ).fetchone()
+    cur: list = _json_loads(row["turns_json"]) if row else []
+    if not isinstance(cur, list):
+        cur = []
+    preserved: list[dict] = []
+    for item in cur:
+        c = mock_memory_coerce_turn(item)
+        if c and (c.get("body") or "").strip():
+            preserved.append(c)
+    merged = preserved + new_turns
+
+    conn.execute(
+        """
+        INSERT INTO mock_conversation_memory (user_id, mailbox_id, slot, turns_json, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id, mailbox_id, slot) DO UPDATE SET
+            turns_json = excluded.turns_json,
+            updated_at = excluded.updated_at
+        """,
+        (int(user_id), int(mailbox_id), slot, _json_dumps(merged), now),
+    )
+    conn.commit()
+    conn.close()
+    return {"count": len(merged), "turns": merged}

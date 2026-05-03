@@ -236,6 +236,7 @@ def run_inbound_graph(
         "sentiment": result.get("sentiment", "neutral"),
         "tone": result.get("tone", "cooperative"),
         "escalate_recommended": result.get("escalate_recommended", False),
+        "analysis_reason": result.get("analysis_reason", ""),
         "should_escalate": result.get("should_escalate", False),
         "escalation_reason": result.get("escalation_reason", ""),
         "suggested_reply": result.get("suggested_reply", ""),

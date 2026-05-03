@@ -106,7 +106,15 @@ def call_llm(
     }
     resp = requests.post(url, headers=headers, json=payload, timeout=config.LLM_TIMEOUT)
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"].strip()
+    data = resp.json()
+    choices = data.get("choices") or []
+    if not choices:
+        raise ValueError("LLM 返回无 choices，请检查模型与路由配置")
+    msg = (choices[0] or {}).get("message") or {}
+    raw_content = msg.get("content")
+    if raw_content is None:
+        return ""
+    return str(raw_content).strip()
 
 
 def _clean_json_block(raw: str) -> str:
@@ -118,6 +126,85 @@ def _clean_json_block(raw: str) -> str:
     if text.endswith("```"):
         text = text[:-3].strip()
     return text
+
+
+def _parse_llm_json_object(raw: str) -> dict[str, Any]:
+    """
+    从模型回复中抽出单个 JSON 对象。容错：前后说明文字、``` 围栏；
+    以及「首段即合法 JSON」后仍有尾部噪音（用 JSONDecoder.raw_decode）。
+    """
+    text = _clean_json_block((raw or "").strip())
+    if not text:
+        raise ValueError("模型返回为空")
+
+    try:
+        out = json.loads(text)
+        if isinstance(out, dict):
+            return out
+        raise ValueError("JSON 顶层不是对象")
+    except json.JSONDecodeError:
+        pass
+
+    start = text.find("{")
+    if start < 0:
+        raise ValueError("未找到 JSON 对象起始")
+    decoder = json.JSONDecoder()
+    try:
+        obj, _end = decoder.raw_decode(text[start:])
+        if isinstance(obj, dict):
+            return obj
+        raise ValueError("JSON 顶层不是对象")
+    except json.JSONDecodeError as e:
+        snippet = text[start : start + 420].replace("\n", "\\n")
+        raise ValueError(f"JSON 解析失败: {e}; 起始片段≈ {snippet}") from e
+
+
+def _coerce_llm_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "yes", "1", "是", "y")
+    return False
+
+
+def _coerce_sentiment_from_llm(v: Any) -> str:
+    s = str(v if v is not None else "").strip().strip("\"'”“").lower()
+    if s in ("satisfied", "neutral", "dissatisfied"):
+        return s
+    zh = str(v if v is not None else "").strip()
+    if any(x in zh for x in ("满意", "感谢", "已解决", "谢意")):
+        return "satisfied"
+    if any(x in zh for x in ("不满", "抱怨", "失望", "愤怒", "生气")):
+        return "dissatisfied"
+    if "neutral" in s or any(x in zh for x in ("中性", "一般", "咨询")):
+        return "neutral"
+    if "dissatisf" in s or "negative" in s or "anger" in s:
+        return "dissatisfied"
+    if "posit" in s or "happ" in s or "grateful" in s or "thank" in s:
+        return "satisfied"
+    return "neutral"
+
+
+def _coerce_tone_from_llm(v: Any) -> str:
+    s = str(v if v is not None else "").strip().strip("\"'”“").lower()
+    if s in ("cooperative", "firm", "hostile"):
+        return s
+    zh = str(v if v is not None else "").strip()
+    if any(x in zh for x in ("敌对", "威胁", "辱骂", "骂人", "极端")):
+        return "hostile"
+    if any(x in zh for x in ("坚决", "强硬", "坚持", "严正")):
+        return "firm"
+    if any(x in zh for x in ("配合", "平和", "友善")):
+        return "cooperative"
+    if "hostile" in s or "threat" in s or "abusive" in s:
+        return "hostile"
+    if "firm" in s:
+        return "firm"
+    if "coop" in s or "friendly" in s or "polite" in s:
+        return "cooperative"
+    return "cooperative"
 
 
 # ─── 情绪与语气检测 ────────────────────────────────────────────────────────────
@@ -147,13 +234,15 @@ def detect_customer_satisfaction_and_tone(
 
     system_prompt = """你是专业的客服情绪分析助手。
 
-请根据用户来信内容，分析其情绪满意度与语气，并只返回 JSON：
+请根据用户来信内容，分析其情绪满意度与语气。**只输出一个 JSON 对象**，键名必须为英文：
 {
-  "sentiment": "satisfied|neutral|dissatisfied",
-  "tone": "cooperative|firm|hostile",
-  "escalate_recommended": true|false,
+  "sentiment": "satisfied"|"neutral"|"dissatisfied",
+  "tone": "cooperative"|"firm"|"hostile",
+  "escalate_recommended": true 或 false,
   "reason_short": "一句中文原因"
 }
+
+禁止 Markdown、禁止代码围栏、不要在 JSON 外写任何字符。
 
 定义：
 - sentiment:
@@ -166,7 +255,7 @@ def detect_customer_satisfaction_and_tone(
   - hostile: 威胁、骂人、使用极端词汇
 - escalate_recommended: 当 dissatisfied 且 tone 为 firm/hostile，或涉及**明确要求退款/赔偿/补偿金额**、法律/媒体/投诉升级时，建议升级（便于人工售后介入）
 
-只输出 JSON，不要任何额外解释。"""
+只输出一行起止完整的 JSON（reason_short 内勿使用未转义的双引号）。"""
 
     user_prompt = f"""联系人：{contact_name}
 
@@ -183,20 +272,16 @@ def detect_customer_satisfaction_and_tone(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.1,
-            max_tokens=200,
+            max_tokens=384,
         )
-        result = json.loads(_clean_json_block(raw))
-        sentiment = result.get("sentiment", "neutral")
-        if sentiment not in ("satisfied", "neutral", "dissatisfied"):
-            sentiment = "neutral"
-        tone = result.get("tone", "cooperative")
-        if tone not in ("cooperative", "firm", "hostile"):
-            tone = "cooperative"
+        result = _parse_llm_json_object(raw)
+        sentiment = _coerce_sentiment_from_llm(result.get("sentiment", "neutral"))
+        tone = _coerce_tone_from_llm(result.get("tone", "cooperative"))
         return {
             "sentiment": sentiment,
             "tone": tone,
-            "escalate_recommended": bool(result.get("escalate_recommended", False)),
-            "reason_short": result.get("reason_short", ""),
+            "escalate_recommended": _coerce_llm_bool(result.get("escalate_recommended", False)),
+            "reason_short": str(result.get("reason_short", "") or "").strip(),
         }
     except Exception as exc:
         logger.warning(f"⚠️ 情绪检测失败，使用规则兜底: {exc}")
@@ -764,6 +849,97 @@ def translate_to_chinese_for_support(text: str, max_chars: int = 2000) -> str:
         )
     except Exception as exc:
         logger.warning(f"⚠️ 用户原文译中文失败: {exc}")
+        return ""
+
+
+def _normalize_plain_translation(text: str) -> str:
+    """去掉模型偶发的 ``` 围栏与首尾空白。"""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    if t.startswith("```"):
+        t = _clean_json_block(t)
+    return t.strip()
+
+
+def translate_customer_service_plain_to_zh(text: str, *, max_chars: int = 12000) -> str:
+    """
+    任意客服相关长文 → 简体中文（内部阅读）。
+    translate_to_chinese_for_support() 偏重「客户来信」且默认截断较短；本方草稿用本函数更合适。
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    raw = raw[:max_chars]
+    system_prompt = (
+        "你是专业译员，面向客服团队内部阅读。\n"
+        "请将以下内容完整译为**简体中文**。\n"
+        "内容可能是：客户来信、或拟发给客户的回复草稿（英/其它语）、或者混合。\n"
+        "忠实原意、保留语气与专有名词（人名、订单号、SKU、邮箱、网址）。已是通顺简体中文则轻校后输出。\n"
+        "只输出译文，不要前缀、后记或 Markdown 围栏。"
+    )
+    try:
+        out = call_llm(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": raw},
+            ],
+            temperature=0.2,
+            max_tokens=max(1800, min(8000, int(len(raw) * 0.7) + 1200)),
+        )
+        return _normalize_plain_translation(out)
+    except Exception as exc:
+        logger.warning("⚠️ 通用客服段落译中文失败: %s", exc)
+        return ""
+
+
+def translate_reply_draft_to_zh_for_dashboard(text: str, max_chars: int = 12000) -> str:
+    """
+    沙箱仪表盘：将拟发给客户的邮件草稿译为简体中文。
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    raw = raw[:max_chars]
+    sample = raw[: min(800, len(raw))]
+    if len(sample) >= 40:
+        cjk = sum(1 for c in sample if "\u4e00" <= c <= "\u9fff")
+        # 避免因落款等少量汉字误判为「正文已是中文」而跳过译文
+        if cjk / len(sample) >= 0.52:
+            return ""
+
+    outbound_prompt = (
+        "你是译员，稿件供中文客服同事内部阅读。\n"
+        "请将以下「我方准备发给客户的邮件正文」（常为英文）译为**简体中文**。\n"
+        "忠实原意、语气和礼貌程度；保留订单号、SKU、邮箱、链接与人名。\n"
+        "只输出译文，不要解释、标题或 Markdown 围栏。"
+    )
+    max_tokens = max(1400, min(8000, int(len(raw) * 0.65) + 800))
+    try:
+        out = call_llm(
+            [
+                {"role": "system", "content": outbound_prompt},
+                {"role": "user", "content": raw},
+            ],
+            temperature=0.2,
+            max_tokens=max_tokens,
+        )
+        out = _normalize_plain_translation(out)
+        if out:
+            return out
+        logger.warning("⚠️ 沙箱草稿译中文：主模型返回空，尝试通用段落译")
+    except Exception as exc:
+        logger.warning("⚠️ 沙箱草稿译中文失败（主路径）: %s", exc)
+    fb = translate_customer_service_plain_to_zh(raw, max_chars=max_chars)
+    if fb:
+        return fb
+    try:
+        take = raw[:12000]
+        fb2 = translate_to_chinese_for_support(take, max_chars=len(take))
+        fb2 = _normalize_plain_translation(fb2)
+        return fb2 or ""
+    except Exception as exc:
+        logger.warning("⚠️ 沙箱草稿译中文最后一跳失败: %s", exc)
         return ""
 
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+import uuid
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -46,6 +47,7 @@ from app.graphs import run_inbound_graph
 from app.llm_service import (
     generate_calm_reply,
     generate_escalation_summary,
+    translate_reply_draft_to_zh_for_dashboard,
     translate_to_chinese_for_support,
 )
 from app.mail_service import fetch_unread_emails, send_internal_escalation, send_reply
@@ -259,6 +261,38 @@ def _get_calm_internal_recipient(
     return _get_owner_email_and_name(product)
 
 
+def _normalize_mock_prior_messages(raw: list | None) -> list[dict]:
+    """将前端传入的对话轮次转为与 thread_history 一致的结构。"""
+    out: list[dict] = []
+    for m in raw or []:
+        if not isinstance(m, dict):
+            continue
+        role_s = str(m.get("role") or "kol").strip().lower()
+        is_our = role_s in ("our", "ours", "客服", "mine", "support", "staff")
+        out.append(
+            {
+                "subject": str(m.get("subject") or ""),
+                "body": str(m.get("body") or ""),
+                "is_mine": is_our,
+            }
+        )
+    return out
+
+
+def _contact_for_mock(msg: dict) -> dict:
+    """沙箱不落库：仅用已有联系人，否则构造内存 dict。"""
+    em = (msg.get("from_email") or "").strip().lower()
+    if em:
+        hit = get_creator_by_email(em)
+        if hit:
+            return hit
+    return {
+        "id": None,
+        "email": em or "",
+        "name": (msg.get("from_name") or "").strip(),
+    }
+
+
 def _cooldown_ok(thread_id: str) -> bool:
     """检查同线程升级邮件冷却时间是否已过。"""
     last_sent_iso = get_last_escalation_time(thread_id)
@@ -279,31 +313,87 @@ def _can_send_escalation_now(thread_id: str, *, for_calm_path: bool) -> bool:
     return _cooldown_ok(thread_id)
 
 
-def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
+def _handle_one_email(
+    msg: dict,
+    mailbox_row: dict,
+    *,
+    dry_run: bool = False,
+    mock_thread_key: str | None = None,
+    prior_thread_history: list[dict] | None = None,
+    product_override: dict | None = None,
+) -> dict:
     t0 = time.perf_counter()
+    dry_run_internal_preview: dict | None = None
+    calm_mode: str | None = None
+
     mailbox_id = int(mailbox_row["id"])
-    raw_key = _thread_key(msg)
-    thread_id = scope_thread_id(mailbox_id, raw_key)
-    dedup_raw = msg["message_id"] or msg["uid"]
-    message_id = scope_message_stub(mailbox_id, dedup_raw)
+    if dry_run:
+        mk = (mock_thread_key or "").strip() or str(uuid.uuid4())
+        scoped_raw = f"__mock__:{mk}"
+        thread_id = scope_thread_id(mailbox_id, scoped_raw)
+        dedup_raw = msg.get("message_id") or msg.get("uid") or f"mock-{uuid.uuid4()}"
+        message_id = scope_message_stub(mailbox_id, dedup_raw)
+    else:
+        raw_key = _thread_key(msg)
+        thread_id = scope_thread_id(mailbox_id, raw_key)
+        dedup_raw = msg["message_id"] or msg["uid"]
+        message_id = scope_message_stub(mailbox_id, dedup_raw)
+    prefix = "🧪 [沙箱]" if dry_run else "📩"
     logger.info("─" * 50)
-    logger.info(f"📩 收到来信: {msg['from_name']} <{msg['from_email']}>")
-    logger.info(f"   主题: {msg['subject']}")
+    logger.info(f"{prefix} 收到来信: {msg.get('from_name','')} <{msg.get('from_email','')}>")
+    logger.info(f"   主题: {msg.get('subject','')}")
     logger.info(f"   Thread key: {thread_id[:80]}")
 
-    contact = _resolve_contact(msg, thread_id)
-    product = _resolve_product(thread_id)
+    if dry_run:
+        contact = _contact_for_mock(msg)
+        product = product_override
+    else:
+        contact = _resolve_contact(msg, thread_id)
+        product = _resolve_product(thread_id)
 
-    save_thread_message(
-        thread_id=thread_id,
-        message_id=message_id,
-        role="kol",
-        subject=msg["subject"],
-        body=msg["body"][:config.BODY_EXCERPT_LENGTH],
-        creator_id=contact.get("id"),
-    )
+    if not dry_run:
+        save_thread_message(
+            thread_id=thread_id,
+            message_id=message_id,
+            role="kol",
+            subject=msg["subject"],
+            body=msg["body"][:config.BODY_EXCERPT_LENGTH],
+            creator_id=contact.get("id"),
+        )
 
-    thread_history = _build_thread_history(thread_id)
+    if dry_run:
+        prior_state = None
+    else:
+        prior_state = get_thread_state(thread_id)
+    if prior_state and int(prior_state.get("manual_handoff_completed") or 0):
+        logger.info("🤚 本会话已人工结案，来信已归档，跳过自动分析/升级/回复")
+        upsert_thread_state(
+            thread_id=thread_id,
+            kol_email=msg["from_email"],
+            kol_name=msg.get("from_name", ""),
+            stage=int(prior_state.get("current_stage") or 1),
+            last_message_id=message_id,
+            notes=prior_state.get("notes") or "",
+            creator_id=prior_state.get("creator_id"),
+            campaign_id=prior_state.get("campaign_id"),
+            product_id=prior_state.get("product_id"),
+            intent_label=prior_state.get("intent_label"),
+            mailbox_id=mailbox_id,
+        )
+        return {
+            "sentiment": "neutral",
+            "tone": "cooperative",
+            "escalated": False,
+            "skipped_auto": True,
+            "contact_email": contact.get("email"),
+            "contact_name": contact.get("name"),
+            "thread_id": thread_id,
+        }
+
+    if dry_run:
+        thread_history = list(prior_thread_history or [])
+    else:
+        thread_history = _build_thread_history(thread_id)
     t_after_prep = time.perf_counter()
 
     graph_result = run_inbound_graph(
@@ -344,7 +434,7 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
     sec_calm = 0.0
 
     def _do_send_internal(reason: str, for_calm: bool) -> bool:
-        nonlocal sec_internal
+        nonlocal sec_internal, dry_run_internal_preview
         _t_int0 = time.perf_counter()
         try:
             if not owner_email:
@@ -359,7 +449,7 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
                     "⚠️ 内部升级收件人与客户邮箱相同，已跳过发送工单，请检查产品 owner / DEFAULT_SUPPORT_OWNER_EMAIL 配置"
                 )
                 return False
-            if not _can_send_escalation_now(thread_id, for_calm_path=for_calm):
+            if (not dry_run) and not _can_send_escalation_now(thread_id, for_calm_path=for_calm):
                 logger.info(f"⏳ 升级冷却中，跳过内部通知（cooldown={config.ESCALATION_EMAIL_COOLDOWN_MINUTES}min）")
                 return False
             # 同线程已成功写入的升级条数；本封即将发送的为第 (prior+1) 次推送
@@ -390,6 +480,20 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
                     tone=tone,
                     reason=reason,
                 )
+
+            if dry_run:
+                dry_run_internal_preview = {
+                    "to_email": owner_email,
+                    "to_name": owner_name,
+                    "priority": priority,
+                    "reason": reason,
+                    "escalation_summary": summary,
+                    "original_message_excerpt": orig_for_escalation[:1200],
+                    "original_message_zh": original_message_zh,
+                    "push_sequence": push_sequence,
+                }
+                logger.info(f"🧪 [沙箱] 已生成内部工单内容，未发信 → {owner_email}")
+                return True
 
             sent_at = datetime.now().isoformat()
             success = send_internal_escalation(
@@ -485,7 +589,7 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
 
     # ── 发送用户回复 ────────────────────────────────────────────────────────────
     sec_outbound = 0.0
-    if suggested_reply:
+    if suggested_reply and not dry_run:
         t_out0 = time.perf_counter()
         sent_ok = send_reply(mailbox_row, original=msg, reply_body=suggested_reply)
         if sent_ok:
@@ -501,36 +605,40 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
         else:
             logger.error("❌ 客服回复发送失败")
         sec_outbound = time.perf_counter() - t_out0
+    elif suggested_reply and dry_run:
+        logger.info("🧪 [沙箱] 已生成对外回复草稿，未发 SMTP")
 
     # ── 记录意图结果 ─────────────────────────────────────────────────────────────
     t_persist0 = time.perf_counter()
-    create_intent_result(
-        {
-            "thread_id": thread_id,
-            "creator_id": contact.get("id"),
-            "product_id": (resolved_product or {}).get("id"),
-            "message_id": message_id,
-            "intent": "cs_reply",
-            "confidence": 1.0,
-            "summary": escalation_reason if should_escalate else f"情绪:{sentiment} 语气:{tone}",
-            "suggested_reply": suggested_reply,
-            "cs_sentiment": sentiment,
-            "cs_tone": tone,
-            "escalated": escalated_flag,
-        }
-    )
+    if not dry_run:
+        create_intent_result(
+            {
+                "thread_id": thread_id,
+                "creator_id": contact.get("id"),
+                "product_id": (resolved_product or {}).get("id"),
+                "message_id": message_id,
+                "intent": "cs_reply",
+                "confidence": 1.0,
+                "summary": escalation_reason if should_escalate else f"情绪:{sentiment} 语气:{tone}",
+                "suggested_reply": suggested_reply,
+                "cs_sentiment": sentiment,
+                "cs_tone": tone,
+                "escalated": escalated_flag,
+            }
+        )
 
-    upsert_thread_state(
-        thread_id=thread_id,
-        kol_email=msg["from_email"],
-        kol_name=msg.get("from_name", ""),
-        stage=1,
-        last_message_id=message_id,
-        notes=f"情绪:{sentiment} 语气:{tone}" + (" [已升级]" if escalated_flag else ""),
-        creator_id=contact.get("id"),
-        product_id=(resolved_product or {}).get("id"),
-        intent_label=f"{sentiment}/{tone}",
-    )
+        upsert_thread_state(
+            thread_id=thread_id,
+            kol_email=msg["from_email"],
+            kol_name=msg.get("from_name", ""),
+            stage=1,
+            last_message_id=message_id,
+            notes=f"情绪:{sentiment} 语气:{tone}" + (" [已升级]" if escalated_flag else ""),
+            creator_id=contact.get("id"),
+            product_id=(resolved_product or {}).get("id"),
+            intent_label=f"{sentiment}/{tone}",
+            mailbox_id=mailbox_id,
+        )
 
     sec_persist = time.perf_counter() - t_persist0
     sec_total = time.perf_counter() - t0
@@ -547,8 +655,15 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
         sec_persist,
         sec_other,
     )
-    logger.info(f"🎯 处理完成 | sentiment={sentiment} tone={tone} escalated={escalated_flag}")
-    return {
+    logger.info(f"🎯 {'沙箱推演完成' if dry_run else '处理完成'} | sentiment={sentiment} tone={tone} escalated={escalated_flag}")
+    suggested_reply_zh = ""
+    if dry_run and (suggested_reply or "").strip():
+        try:
+            suggested_reply_zh = translate_reply_draft_to_zh_for_dashboard(suggested_reply)
+        except Exception as exc:
+            logger.warning("沙箱建议回复译中文失败: %s", exc)
+            suggested_reply_zh = ""
+    base = {
         "sentiment": sentiment,
         "tone": tone,
         "escalated": escalated_flag,
@@ -556,16 +671,72 @@ def _handle_one_email(msg: dict, mailbox_row: dict) -> dict:
         "contact_name": contact.get("name"),
         "thread_id": thread_id,
     }
+    if dry_run:
+        base["dry_run"] = True
+        base["suggested_reply"] = suggested_reply or ""
+        base["suggested_reply_zh"] = suggested_reply_zh or ""
+        base["escalation_reason"] = escalation_reason
+        base["should_escalate"] = should_escalate
+        base["needs_calm"] = needs_calm
+        base["calm_mode"] = calm_mode
+        base["after_sales_notified_simulated"] = after_sales_notified
+        base["resolved_product_id"] = (resolved_product or {}).get("id")
+        base["resolved_product_name"] = _product_display_for_mail(resolved_product)
+        base["internal_ticket_preview"] = dry_run_internal_preview
+        base["escalate_recommended"] = graph_result.get("escalate_recommended")
+        base["graph_escalation_summary"] = (graph_result.get("escalation_summary") or "").strip()
+        base["would_send_reply"] = bool((suggested_reply or "").strip())
+        base["analysis_reason"] = (graph_result.get("analysis_reason") or "").strip()
+        base["timing_seconds"] = {
+            "prep": round(sec_prep, 4),
+            "graph": round(sec_graph, 4),
+            "internal": round(sec_internal, 4),
+            "calm": round(sec_calm, 4),
+            "outbound": round(sec_outbound, 4),
+            "persist": round(sec_persist, 4),
+            "total": round(sec_total, 4),
+        }
+    return base
 
 
-def _msg_sort_key(msg: dict) -> tuple[str, int]:
-    """同 thread 内多封未读时的稳定顺序：日期字符串升序，其次 IMAP uid。"""
-    uid_raw = str(msg.get("uid") or "")
-    try:
-        uid_i = int(uid_raw)
-    except ValueError:
-        uid_i = 0
-    return (str(msg.get("date") or ""), uid_i)
+def run_mock_inbound(
+    mailbox_row: dict,
+    *,
+    from_email: str,
+    from_name: str = "",
+    subject: str = "",
+    body: str = "",
+    thread_key: str | None = None,
+    prior_messages: list | None = None,
+    product_id: str | None = None,
+) -> dict:
+    """
+    走与真实来信相同的分析与话术链路，不写库、不发 SMTP/IMAP。
+    thread_key 相同可固定 mock 线程维度（不参与真实会话）。
+    """
+    msg = {
+        "uid": str(uuid.uuid4()),
+        "message_id": f"<{uuid.uuid4()}@mock.local>",
+        "references": "",
+        "subject": subject or "",
+        "from_name": from_name or "",
+        "from_email": (from_email or "").strip(),
+        "from_raw": f"{from_name or ''} <{(from_email or '').strip()}>".strip(),
+        "body": body or "",
+        "date": datetime.now().isoformat(),
+    }
+    prod = None
+    if product_id and str(product_id).strip():
+        prod = get_product(str(product_id).strip())
+    prior = _normalize_mock_prior_messages(prior_messages)
+    return _handle_one_email(
+        msg,
+        mailbox_row,
+        dry_run=True,
+        mock_thread_key=thread_key,
+        prior_thread_history=prior,
+        product_override=prod,
+    )
 
 
 def _process_thread_batch(tasks: list[dict]) -> dict:
@@ -584,8 +755,9 @@ def _process_thread_batch(tasks: list[dict]) -> dict:
         processed += 1
         try:
             result = _handle_one_email(msg, mailbox_row)
-            k = result.get("sentiment", "neutral")
-            sentiment_counters[k] = sentiment_counters.get(k, 0) + 1
+            if not result.get("skipped_auto"):
+                k = result.get("sentiment", "neutral")
+                sentiment_counters[k] = sentiment_counters.get(k, 0) + 1
             if result.get("escalated"):
                 escalated += 1
             success += 1
