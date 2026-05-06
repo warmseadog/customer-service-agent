@@ -658,7 +658,7 @@ calm_mode: {calm_mode}
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.4,
-                max_tokens=780 if calm_mode == "soothe_focus" else 750,
+                max_tokens=1500 if calm_mode == "soothe_focus" else 1400,
             )
         except Exception as exc:
             logger.warning(f"⚠️ 安抚回复生成失败，使用模板兜底: {exc}")
@@ -909,10 +909,11 @@ def translate_reply_draft_to_zh_for_dashboard(text: str, max_chars: int = 12000)
             return ""
 
     outbound_prompt = (
-        "你是译员，稿件供中文客服同事内部阅读。\n"
+        "你是专业译员，以下稿件供中文客服同事内部阅读。\n"
         "请将以下「我方准备发给客户的邮件正文」（常为英文）译为**简体中文**。\n"
         "忠实原意、语气和礼貌程度；保留订单号、SKU、邮箱、链接与人名。\n"
-        "只输出译文，不要解释、标题或 Markdown 围栏。"
+        "注意：原文可能因为仍在草稿阶段而不完整（例如在末尾截断），请尽可能将现有的内容翻译出来即可，不要补写内容。\n"
+        "【重要】只输出译文正文，绝对不要解释、不要加标题、不要加 Markdown 围栏符号（如 ``` ）。"
     )
     max_tokens = max(1400, min(8000, int(len(raw) * 0.65) + 800))
     try:

@@ -286,7 +286,7 @@ body.role-team-member .hero-hint-member{display:block!important}
       <p class="brand-kicker"><span class="brand-cn">拓基时代</span><span class="brand-en">TUOJISHIDAI</span></p>
       <div class="hero-body">
         <h1>客服邮件工作台</h1>
-        <p class="hero-hint hero-hint-full">由<strong>管理员或运营</strong>在准备好邮箱与模型后点击「<strong>启动全局轮询</strong>」开启后台收信；<strong>组长与组员</strong>仅可在「邮箱账户」中<strong>开启/暂停自己权限内各邮箱</strong>的自动拉信。会话支持「<strong>确认已人工处理完</strong>」：标记后<strong>后续客户来信只归档、不自动回复</strong>。全局兜底收件人与可分配负责人名单在「内部客服」配置。</p>
+        <p class="hero-hint hero-hint-full">由<strong>管理员或运营</strong>在准备好邮箱与模型后点击「<strong>启动全局轮询</strong>」开启后台收信；<strong>组长与组员</strong>仅可在「邮箱账户」中<strong>开启/暂停自己权限内各邮箱</strong>的自动拉信。会话支持「<strong>确认已人工处理完</strong>」：标记后<strong>后续客户来信只归档、不自动回复</strong>。内部升级仅发至产品在库中配置的负责人；可分配负责人名单与历史兜底字段在「内部客服」维护。</p>
         <p class="hero-hint hero-hint-viewer">当前为<strong>观摩</strong>账号：仅只读查阅（若管理员已为该账号<strong>绑定邮箱范围</strong>则仅限这些邮箱；否则不限邮箱）。不显示配置与修改入口。</p>
         <p class="hero-hint hero-hint-member">当前为<strong>组员</strong>账号：仅展示已绑定邮箱相关数据；可在「邮箱账户」中开启/暂停本邮箱拉信，在会话中标记人工结案。产品维护与内部路由请在组长或管理员处配置。</p>
       </div>
@@ -353,7 +353,10 @@ body.role-team-member .hero-hint-member{display:block!important}
               </div>
             </div>
           </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button type="button" class="secondary small need-thread-handoff" onclick="bulkManualHandoffThreads()">一键确认人工处理完</button>
           <button type="button" class="danger small need-full-admin" onclick="deleteAllThreads()">清空全部会话</button>
+        </div>
         </div>
         <div id="thread-list" class="list"><div class="empty">加载中...</div></div>
       </div>
@@ -371,7 +374,7 @@ body.role-team-member .hero-hint-member{display:block!important}
         <h3>已发内部通知</h3>
         <button type="button" class="danger small need-full-admin" onclick="deleteAllEscalations()">清空本列表</button>
       </div>
-      <div class="muted" style="margin-bottom:12px">需要人工跟进来信时，系统会按规则给产品负责人/兜底收件人发<strong>内部说明邮件</strong>；本页即这些邮件的留痕（便于对账、排障，不代表已在客户侧展示）。</div>
+      <div class="muted" style="margin-bottom:12px">需要人工跟进来信时，系统会按规则给<strong>产品负责人或备用负责人</strong>发<strong>内部说明邮件</strong>（无负责人则不发）；本页即这些邮件的留痕（便于对账、排障，不代表已在客户侧展示）。</div>
       <div class="table-wrap">
         <table class="tbl">
           <thead><tr><th>时间</th><th>会话 ID</th><th>客户</th><th>产品</th><th>事由</th><th>通知发送至</th><th>操作</th></tr></thead>
@@ -451,7 +454,7 @@ body.role-team-member .hero-hint-member{display:block!important}
           负责人=团队内收到<strong>内部通知</strong>的一线同事。请在「内部客服」页统一维护可分配名单，再回到这里绑定产品。<br><br>
           • <strong>内部邮箱</strong>：有来信匹配到该产品时，系统发内部说明邮件的<strong>主收件人</strong>。<br>
           • <strong>备用负责人邮箱</strong>：主邮箱为空时尝试使用。<br>
-          • 未匹配到产品等：在 <strong>内部客服</strong> 页配置「全局兜底收件人」路由（团队公共邮箱等）。<br><br>
+          • 未匹配到产品或产品未配置负责人：不会发内部升级邮件；请在 <strong>产品库</strong> 中为可识别产品填写负责人。<br><br>
           不提供按会话单独改路由；须通过产品与全局收件配置维护。
         </div>
       </div>
@@ -505,20 +508,20 @@ body.role-team-member .hero-hint-member{display:block!important}
     </div>
     <div class="box esc-settings-card" id="esc-escalation-box" style="margin-top:16px">
       <div id="esc-minimal-collapsed" class="esc-minimal-collapsed">
-        <span class="esc-minimal-label">全局收件人</span>
+        <span class="esc-minimal-label">兜底配置</span>
         <button type="button" class="secondary small need-op" onclick="openEscalationEditor()">设置</button>
       </div>
       <div id="esc-full-panel" class="esc-full-panel" hidden>
-        <h3>内部通知：全局兜底收件人</h3>
-        <p class="esc-card-sub">无产品负责人时，系统按此邮箱发内部说明邮件</p>
+        <h3>内部通知：历史兜底配置（不参与内部升级）</h3>
+        <p class="esc-card-sub">内部升级邮件<strong>仅</strong>发往产品库中的负责人 / 备用负责人；下方表单与 .env 为保留字段，当前版本<strong>不会</strong>因无负责人而向此邮箱发内部通知</p>
         <div class="esc-effective-summary" id="esc-effective-summary">
           <div class="esc-eff-row">
-            <span class="esc-eff-k">全局兜底 · 当前生效</span>
+            <span class="esc-eff-k">已保存的兜底邮箱（仅供参考）</span>
             <span class="esc-eff-v" id="sum-default-owner">（未配置）</span>
           </div>
         </div>
         <div id="esc-edit-body" class="esc-edit-body">
-          <p class="muted" style="margin:0 0 8px">保存后立即生效；邮箱留空并保存则回退 .env。</p>
+          <p class="muted" style="margin:0 0 8px">保存后写入数据库；邮箱留空并保存则该字段回退 .env。内部发信路由不使用此处。</p>
           <div class="esc-form-compact">
             <div class="two-col">
               <div>
@@ -543,8 +546,8 @@ body.role-team-member .hero-hint-member{display:block!important}
       <div class="box">
         <h3>说明</h3>
         <div class="muted">
-          本页集中维护<strong>团队内部</strong>路由：上方为日常可指派同事，下方为无产品/需兜底时的全局兜底收件人；不再在仪表盘维护「来函客户」主档。<br><br>
-          来信匹配到产品时优先通知该产品负责人；未命中、负责人缺省或需公共邮箱时，走全局兜底。<br><br>
+          本页集中维护<strong>团队内部</strong>路由：上方为产品负责人下拉的同事名单，下方为历史兜底配置（当前不参与内部升级）；不再在仪表盘维护「来函客户」主档。<br><br>
+          来信匹配到产品时，内部通知发往该产品配置的负责人或备用负责人；未配置则不发内部通知。<br><br>
           来函发件人仍会在会话、客诉分析、内部通知中展示，无需在此单独建档。
         </div>
       </div>
@@ -552,7 +555,7 @@ body.role-team-member .hero-hint-member{display:block!important}
         <h3>使用顺序</h3>
         <div class="muted">
           先在本页维护<strong>可分配负责人名单</strong>，再到「产品库」绑定各产品负责人。<br><br>
-          需要统一转公共邮箱或全局兜底时，再配置「全局兜底收件人」。
+          若仍需在库中保留团队公共邮箱字符串，可使用下方兜底表单或仅在产品上使用 fallback 负责人字段。
         </div>
       </div>
     </div>
@@ -1153,7 +1156,7 @@ function updateProductSubtabsHint(){
     return;
   }
   if(cur===''){
-    el.textContent='「全部产品」查看所有条目；点选某一邮箱后，列表仅显示已关联到该邮箱的产品。邮箱较多时，可点击右侧 🔍 输入关键词筛选上方标签。保存新产品时，若正筛选某一邮箱，会自动勾选该邮箱。';
+    el.textContent='「全部产品」查看所有条目；点选某一邮箱后，列表仅显示已关联到该邮箱的产品。邮箱较多时，可点击右侧 🔍 输入关键词筛选上方标签。产品与邮箱的关联仅以产品表单中的复选框为准。';
     return;
   }
   const mid=parseInt(cur,10);
@@ -1847,7 +1850,7 @@ async function loadStatus(){
   const smb=document.getElementById('sum-mailboxes');
   if(smb) smb.textContent=data.mailbox_count??0;
   const defaultEl=document.getElementById('sum-default-owner');
-  if(defaultEl) defaultEl.textContent=escOwnerDisplay(data.default_support_owner);
+  if(defaultEl) defaultEl.textContent=escOwnerDisplay(data.default_support_owner)+'（内部通知未用）';
 }
 
 async function loadInbox(){
@@ -2011,6 +2014,25 @@ async function deleteOneThread(threadId){
   if(!confirm('将删除本客户会话：对话历史、会话状态、已处理邮件去重记录，及本会话相关客诉分析记录等。确认？')) return;
   const result=await api('DELETE','/thread/'+encodeURIComponent(threadId));
   showBanner(`已删除，影响约 ${result.deleted_rows??0} 行数据`,true);
+}
+
+async function bulkManualHandoffThreads(){
+  const mf=document.getElementById('mailbox-filter');
+  const raw=mf&&mf.value?String(mf.value).trim():'';
+  let mailboxId=null;
+  if(raw!==''){
+    const n=parseInt(raw,10);
+    if(!isNaN(n)) mailboxId=n;
+  }
+  const scopeHint=mailboxId!=null?'当前所选邮箱下':'当前账号可见范围内全部邮箱下';
+  if(!confirm(scopeHint+'所有尚未「人工结案」的会话将一次性标记为已处理完毕，后续来信只归档、不自动回复。确定？')) return;
+  try{
+    const body=mailboxId!=null?{mailbox_id:mailboxId}:{};
+    const data=await fetchJson('/threads/bulk-manual-handoff',{method:'POST',body:JSON.stringify(body)});
+    const n=data.updated_count??0;
+    showBanner(n?`已标记 ${n} 个会话为人工结案`:'没有需要标记的会话（均已结案或无会话）',true);
+    await loadInbox();
+  }catch(err){showBanner('操作失败: '+err.message,false);}
 }
 
 async function deleteAllThreads(){
@@ -2214,13 +2236,7 @@ async function saveProduct(){
     ownerEmail=(opt&&opt.value)?opt.value.trim():'';
     ownerName=(opt&&opt.textContent)?opt.textContent.trim():'';
   }
-  let mailboxIds=[...document.querySelectorAll('.product-mb-cb:checked')].map(cb=>parseInt(cb.value,10)).filter(n=>!isNaN(n));
-  const curF=String(window._productListMailboxId||'');
-  if(curF!==''){
-    const cm=parseInt(curF,10);
-    if(!isNaN(cm)&&!mailboxIds.includes(cm)) mailboxIds.push(cm);
-  }
-  mailboxIds=[...new Set(mailboxIds)].sort((a,b)=>a-b);
+  const mailboxIds=[...new Set([...document.querySelectorAll('.product-mb-cb:checked')].map(cb=>parseInt(cb.value,10)).filter(n=>!isNaN(n)))].sort((a,b)=>a-b);
   await api('POST','/products',{
     id:document.getElementById('product-id').value.trim(),
     asin:document.getElementById('product-asin').value.trim(),
@@ -2240,8 +2256,21 @@ async function saveProduct(){
 }
 
 async function deleteProduct(id){
-  if(!confirm('确认删除产品 '+id+' ?')) return;
+  const curF=String(window._productListMailboxId||'');
+  if(curF!==''){
+    const cm=parseInt(curF,10);
+    if(!isNaN(cm)){
+      if(!confirm('确认从当前邮箱移除该产品关联？产品本身仍保留，其它邮箱下的关联不受影响。')) return;
+      await api('DELETE','/products/'+encodeURIComponent(id)+'/mailboxes/'+encodeURIComponent(cm));
+      await loadProducts();
+      showBanner('已从本邮箱移除关联',true);
+      return;
+    }
+  }
+  if(!confirm('确认删除产品 '+id+' ?（所有邮箱关联一并清除，不可恢复）')) return;
   await api('DELETE','/products/'+encodeURIComponent(id));
+  await loadProducts();
+  showBanner('已删除产品 '+id,true);
 }
 
 async function deleteAllProducts(){
@@ -2301,7 +2330,7 @@ async function loadEscalationForm(){
   document.getElementById('esc-default-name').value=d.default_owner_name||'';
   const ed=esc(d.env_default_email||'（空）');
   document.getElementById('esc-env-hint').innerHTML=
-    `.env 对照（未在上方填写时使用）：DEFAULT=<code>${ed}</code>`+
+    `<strong>说明：</strong>当前版本内部升级<strong>不会</strong>读取此处；.env 对照 DEFAULT=<code>${ed}</code>`+
     (d.updated_at?` · 数据库更新时间 ${esc(d.updated_at.slice(0,19))}`:'');
   applyEscalationEditorVisibility();
 }
@@ -2316,7 +2345,7 @@ async function saveEscalationSettings(){
     sessionStorage.setItem(ESC_EDITOR_COLLAPSED_KEY,'1');
     await loadAll();
     applyEscalationEditorVisibility();
-    showBanner('内部通知收件人（全局兜底）已保存',true);
+    showBanner('兜底配置已保存（不参与内部升级路由）',true);
   }catch(err){
     showBanner('保存失败: '+err.message,false);
   }

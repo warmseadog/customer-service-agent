@@ -1230,6 +1230,28 @@ def list_mailbox_ids_for_product(product_id: str) -> list[int]:
     return [int(r["mailbox_id"]) for r in rows]
 
 
+def detach_product_mailbox(product_id: str, mailbox_id: int) -> bool:
+    """仅删除 mailbox_products 一行，不删 products 表。返回是否删除了关联。"""
+    pid = str(product_id or "").strip()
+    if not pid:
+        return False
+    try:
+        mid = int(mailbox_id)
+    except (TypeError, ValueError):
+        return False
+    if mid < 1:
+        return False
+    conn = _get_conn()
+    cur = conn.execute(
+        "DELETE FROM mailbox_products WHERE product_id = ? AND mailbox_id = ?",
+        (pid, mid),
+    )
+    ok = cur.rowcount > 0
+    conn.commit()
+    conn.close()
+    return ok
+
+
 def replace_product_mailboxes(product_id: str, mailbox_ids: list[int]) -> None:
     pid = str(product_id or "").strip()
     if not pid:
@@ -1970,6 +1992,65 @@ def set_thread_manual_handoff(
             "SELECT * FROM kol_threads WHERE thread_id = ?", (thread_id,)
         ).fetchone()
         return dict(out) if out else None
+    finally:
+        conn.close()
+
+
+def bulk_set_manual_handoff_completed(
+    *,
+    mailbox_id: int | None,
+    allowed_mailbox_ids: frozenset[int] | None,
+    actor_user_id: int,
+) -> int:
+    """
+    将范围内尚未人工结案的会话批量标记为 manual_handoff_completed。
+    与 list_kols 的邮箱范围逻辑一致：allowed_mailbox_ids 为 None 表示全库；
+    否则仅更新 mailbox_id 属于该集合的线程（可选再按单邮箱收窄）。
+    """
+    now = _now_iso()
+    conn = _get_conn()
+    try:
+        base_set = """
+            UPDATE kol_threads SET
+                manual_handoff_completed = 1,
+                manual_handoff_at = ?,
+                manual_handoff_by = ?,
+                updated_at = ?
+        """
+        zero_cond = "manual_handoff_completed = 0"
+        if allowed_mailbox_ids is not None:
+            mids = sorted(allowed_mailbox_ids)
+            if not mids:
+                return 0
+            if mailbox_id is not None:
+                mid = int(mailbox_id)
+                if mid not in allowed_mailbox_ids:
+                    return 0
+                cur = conn.execute(
+                    base_set
+                    + f" WHERE mailbox_id = ? AND ({zero_cond})",
+                    (now, actor_user_id, now, mid),
+                )
+            else:
+                ph = ",".join("?" * len(mids))
+                cur = conn.execute(
+                    base_set + f" WHERE mailbox_id IN ({ph}) AND ({zero_cond})",
+                    (now, actor_user_id, now, *mids),
+                )
+        else:
+            if mailbox_id is not None:
+                cur = conn.execute(
+                    base_set + f" WHERE mailbox_id = ? AND ({zero_cond})",
+                    (now, actor_user_id, now, int(mailbox_id)),
+                )
+            else:
+                cur = conn.execute(
+                    base_set + f" WHERE ({zero_cond})",
+                    (now, actor_user_id, now),
+                )
+        n = cur.rowcount if cur else 0
+        conn.commit()
+        return int(n)
     finally:
         conn.close()
 

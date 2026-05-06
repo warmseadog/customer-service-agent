@@ -5,6 +5,7 @@ from typing import Any
 from app.database import (
     delete_all_products,
     delete_product,
+    detach_product_mailbox,
     list_mailbox_ids_for_product,
     list_products,
     replace_product_mailboxes,
@@ -78,6 +79,10 @@ def save_product(payload: dict) -> dict:
 
 def remove_product(product_id: str) -> bool:
     return delete_product(product_id)
+
+
+def detach_product_mailbox_link(product_id: str, mailbox_id: int) -> bool:
+    return detach_product_mailbox(product_id, mailbox_id)
 
 
 def remove_all_products() -> int:

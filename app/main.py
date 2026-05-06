@@ -49,6 +49,7 @@ from app.database import (
     auth_list_users,
     auth_purge_expired_sessions,
     auth_update_user,
+    bulk_set_manual_handoff_completed,
     clear_all_thread_data,
     count_escalation_events,
     delete_all_data,
@@ -60,6 +61,7 @@ from app.database import (
     get_escalation_event,
     get_intent_result,
     get_mailbox_raw,
+    get_product,
     get_thread_messages,
     init_db,
     insert_mailbox,
@@ -96,6 +98,7 @@ from app.services.lead_service import (
     remove_intent,
 )
 from app.services.product_service import (
+    detach_product_mailbox_link,
     list_product_rows,
     remove_all_products,
     remove_product,
@@ -163,7 +166,10 @@ async def lifespan(app: FastAPI):
         )
     _esc = settings_api_dict()
     logger.info(
-        f"   全局兜底收件人(生效): {_esc['effective_default_email'] or '（未配置）'}"
+        "   内部升级通知：仅发往产品负责人(owner)或备用负责人(fallback)；无则不发内部邮件"
+    )
+    logger.info(
+        f"   （仪表盘/.env 兜底邮箱「{_esc['effective_default_email'] or '（未配置）'}」保留配置项，内部路由不使用）"
     )
     logger.info("   Dashboard: http://localhost:8000/dashboard")
     if config.AUTO_START_POLLING:
@@ -806,6 +812,17 @@ async def delete_product_api(product_id: str, user: RequireOperator):
     return {"status": "deleted", "product_id": product_id}
 
 
+@app.delete("/products/{product_id}/mailboxes/{mailbox_id}")
+async def detach_product_mailbox_api(product_id: str, mailbox_id: int, user: RequireOperator):
+    """仅从指定收件箱移除产品关联，不删除产品主记录。"""
+    ensure_mailbox_in_scope(user, mailbox_id)
+    if not get_product(product_id):
+        raise HTTPException(status_code=404, detail="产品不存在")
+    if not detach_product_mailbox_link(product_id, mailbox_id):
+        raise HTTPException(status_code=404, detail="该邮箱未关联此产品")
+    return {"status": "ok", "product_id": product_id, "mailbox_id": mailbox_id}
+
+
 @app.delete("/products")
 async def delete_all_products_api(user: RequireAdmin):
     count = remove_all_products()
@@ -944,6 +961,31 @@ async def thread_manual_handoff_api(thread_id: str, payload: dict, user: Require
             detail="暂无该会话状态，请待系统处理过一封信件后再标记",
         )
     return {"status": "ok", "thread": row}
+
+
+@app.post("/threads/bulk-manual-handoff")
+async def bulk_thread_manual_handoff_api(payload: dict, user: RequireTeamMailboxScoped):
+    """
+    将当前权限范围内、与「客户会话」列表一致筛选下的未结案会话，全部标记为人工处理完毕。
+    body.mailbox_id：与 GET /kols?mailbox_id= 相同；省略或 null 表示当前角色可见的全部邮箱。
+    """
+    raw_mb = payload.get("mailbox_id")
+    mailbox_id: int | None
+    if raw_mb is None or raw_mb == "":
+        mailbox_id = None
+    else:
+        try:
+            mailbox_id = int(raw_mb)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="mailbox_id 须为整数或省略")
+        ensure_mailbox_in_scope(user, mailbox_id)
+    allowed = mailbox_scope(user)
+    n = bulk_set_manual_handoff_completed(
+        mailbox_id=mailbox_id,
+        allowed_mailbox_ids=allowed,
+        actor_user_id=user.id,
+    )
+    return {"status": "ok", "updated_count": n}
 
 
 @app.delete("/thread/{thread_id}")

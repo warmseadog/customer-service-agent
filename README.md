@@ -1,6 +1,6 @@
 # 客服邮件工作台
 
-> **被动入站客服邮件 Agent**：自动接收用户来信，分析情绪与语气，生成安抚或普通客服回复，判断是否需要升级并向产品负责人发送内部通知邮件。系统不发送任何主动外呼邮件。
+> **被动入站客服邮件 Agent**：自动接收用户来信，分析情绪与语气，生成安抚或普通客服回复；在需要升级且**产品配置了负责人或备用负责人**时，向对应邮箱发送内部通知。系统不发送任何主动外呼邮件。
 
 ---
 
@@ -24,8 +24,8 @@
    │   安抚/升级场景下是否声称「已联系售后」由处理结果与提示词保证（非 `AUTO_REPLY_ON_ESCALATION` 开关，见下表）
        ↓
    SMTP send_reply → 用户收到回信
-       ↓（若需升级）
-   向产品负责人发送内部升级通知邮件
+       ↓（若需升级且产品配置了负责人或备用负责人）
+   向产品 owner / fallback 发送内部升级通知邮件（无收件人则跳过）
    记录 escalation_events
 ```
 
@@ -37,16 +37,18 @@
 
 | 功能 | 说明 |
 |---|---|
-| **情绪与语气分析** | 每封来信自动分析 sentiment（满意/中性/不满意）和 tone（配合/强硬/敌对） |
+| **情绪与语气分析** | 每封来信自动分析 sentiment（满意/中性/不满意）和 tone（配合/强硬/敌对）；模型返回经 **宽松 JSON 解析与枚举归一**（含适度 `max_tokens`），解析失败时回退关键词规则；**沙盘推演不向 `intent_results` 落库**（结果仅在接口响应与仪表盘沙箱区内展示） |
 | **安抚回复生成** | 不满/强硬/敌对时发安抚信：**语气 hostile** 用高共情、优先道歉 + 必索信息；**配合/强硬** 用专业克制、正常询证 + 必索信息 |
 | **普通客服回复** | 满意/中性+配合时直接回答问题；**满意**时在结尾极委婉提示「若愿意分享体验可帮助他人参考」（零施压） |
 | **安抚少问策略** | 已识别到产品时，安抚信**必索订单号/凭证**，问题描述**非必索**；已提供的信息不重复追问；**多轮后**（我方回信数 ≥ `CALM_EMPATHY_ONLY_MIN_PRIOR_OUTBOUND`，默认 3）对客户**不重复**售后时间线空话，短篇共情为主（`empathy_pure`） |
-| **全局兜底收件人（团队侧）** | `DEFAULT_SUPPORT_OWNER_EMAIL`（.env）或仪表盘**「内部客服」**页内配置；未命中产品或产品无负责人时作为兜底 |
-| **内部通知路由** | 安抚类先发内部通知再回用户；一般不满→**产品 owner 链**；情绪激烈（hostile）→直接送达**产品 owner 链或全局兜底收件人**；含摘要与原文节选 |
+| **内部升级收件人** | **仅**产品 `owner_email` → `fallback_owner_email`。无负责人时不发内部通知；**不再**使用仪表盘/.env「全局兜底」参与路由（该配置仍可在「内部客服」保存，仅供留存，不参与发信） |
+| **内部通知路由** | 安抚类先发内部通知（有负责人时）再回用户；**hostile 与一般安抚相同**，均只走产品负责人链；含摘要与原文节选 |
 | **升级冷却保护** | 同线程升级邮件在冷却时间内不重复发送，避免刷屏 |
 | **产品匹配** | 线程已绑定产品优先使用，否则用关键词匹配产品库兜底 |
 | **多轮对话记忆** | 按邮件线程（Thread）隔离存储完整收发历史，最多送 LLM N 条 |
-| **Web 仪表盘** | 客户会话、内部通知、客诉分析、产品库、**内部客服**（可分配负责人名单 + 备用/兜底收件人）、日志 |
+| **流程沙箱 `/mock/inbound`** | 与真实来信同一套 LangGraph/话术链路**不落库、不发 SMTP**；**对话时间线**与建议英文回信 + 中文参考译文；安抚类生成使用较高 `max_tokens` 以降低英文截断；译中文路径对草稿截断更容错。可选 **沙箱记忆槽**（默认不勾选载入/写回） |
+| **RBAC（五角色）** | `admin` / `operator` 全邮箱；**组长**仅能访问本小组在 **`team_mailboxes` 挂载的邮箱**；**组员/可选收窄的观摩**仅能访问 **`user_mailboxes`** 绑定邮箱；观摩未绑邮箱时仍为全租户只读。详见下文 **「仪表盘登录与权限」** |
+| **Web 仪表盘** | 客户会话、内部通知、客诉分析、产品库、**内部客服**、**邮箱账户**、**流程沙箱**（模拟入站推演）、**账号管理**/**小组与邮箱**（按角色可见）、日志 |
 | **多邮箱收件** | 在仪表盘「邮箱账户」配置多台；每轮 **IMAP 并行拉取**（`MAILBOX_FETCH_MAX_WORKERS`）；**不同邮件会话**可并行处理（`EMAIL_PROCESS_MAX_WORKERS`），同一会话内多封未读仍顺序处理 |
 | **阶段耗时日志** | 每轮结束输出 **本轮阶段耗时**：IMAP 拉取 / 分拣组批 / 处理来信；每封来信结束输出 **本封耗时**：准备与入库来信、入站分析图、内部升级、安抚或兜底正文、回复客户 SMTP、意图落库及「其它」余项，便于定位瓶颈 |
 
@@ -60,7 +62,7 @@ pip install -r requirements.txt
 
 # 2. 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入邮箱密码、LLM API Key、DEFAULT_SUPPORT_OWNER_EMAIL 等
+# 编辑 .env，填入邮箱密码、LLM API Key 等（DEFAULT_SUPPORT_* 为可选遗留字段，内部升级路由不使用）
 
 # 3. 启动服务（自动初始化数据库）
 python -m app.main
@@ -72,13 +74,38 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 # 登录成功后进入：http://localhost:8000/dashboard
 ```
 
+---
+
 ### 仪表盘登录与权限（HTTPS + Cookie）
+
+#### 会话与安全
 
 - **入口**：浏览器访问 [`/login`](http://localhost:8000/login)，使用用户名与密码登录；会话保存在 **HttpOnly** Cookie（名称由 `AUTH_SESSION_COOKIE` 配置，默认 `cs_session`），前端 API 请求需携带 Cookie（仪表盘已使用 `credentials: 'include'`）。
 - **首个管理员**：数据库中 **没有任何用户** 时，若 `.env` 设置了 `AUTH_BOOTSTRAP_ADMIN_USER` / `AUTH_BOOTSTRAP_ADMIN_PASSWORD`，进程启动时会自动创建该 **admin** 账号。已有用户后请通过管理员调用 `POST /auth/users` 等方式建号，勿依赖 bootstrap。
-- **角色**：`admin`（全量，含危险批量删除与用户管理）、`operator`（读写业务数据，不含批量删库/删全产品等）、`viewer`（只读；仪表盘上隐藏保存/删除类按钮。**可选**：为该账号勾选绑定邮箱 → 仅能只读这些数据；若不绑定仍为全站只读）。管理员登录后可在仪表盘 **「账号管理」** 页新建用户、改角色/启用状态/重置密码、删除用户（不可删除当前登录账号）。
 - **HTTPS**：公网部署时由 Nginx/Caddy 等终结 TLS，并设置 `X-Forwarded-Proto: https`（或 `Forwarded`）。生产环境将 **`AUTH_COOKIE_SECURE=true`**，否则浏览器拒绝在 HTTPS 下发送 `Secure` Cookie。本地 HTTP 调试保持 `AUTH_COOKIE_SECURE=false`。
 - **静态页与接口**：`GET /dashboard` 返回仪表盘 HTML（便于未登录时由前端跳转登录）；**所有 JSON API**（除 `POST /auth/login`、公开 `GET /` 等）均需有效会话。
+
+#### 角色与数据范围（RBAC）
+
+| 角色 (`users.role`) | 列表/会话等产品数据可见范围 |
+|---|---|
+| **admin** | 全租户，不写邮箱过滤 |
+| **operator**（业务专员） | 同上 |
+| **viewer**（观摩） | 默认全租户只读；若在 **账号管理** 为该账号配置了 **`user_mailboxes` 绑定**，则仅可读绑定邮箱范围内的数据 |
+| **team_lead**（组长） | 仅能访问：**本组组长**名下小组在 **`teams` + `team_mailboxes`** 中勾选过的邮箱 |
+| **team_member**（组员） | 仅能访问 **`user_mailboxes`** 为其绑定的邮箱（每邮箱在全库至多绑定一人，与观摩共用绑定表语义） |
+
+**路由依赖（服务端硬闸门）摘要**（实现见 `app/auth_deps.py`、`app/main.py`）：
+
+- **全局收件轮询** `POST /start-auto`、`POST /stop-auto`：**仅 admin、operator**
+- **单邮箱自动拉未读**：`PUT /mailboxes/{id}/poll` 设置 `poll_enabled`：**admin / operator / 组长 / 组员**均需 **`ensure_mailbox_in_scope`**，组长/组员只能切自己范围内的邮箱。
+- **邮箱账户**：`POST/PUT/DELETE` 邮箱及连通性 **`POST …/test`**：需 **RequireOperator**，且 **`admin`/`operator`** 不改范围；**组长**对上述写操作仅能作用于 **本小组管辖邮箱**。
+- **小组**：`GET/POST/PATCH/DELETE /teams`、`PUT /teams/{id}/mailboxes`：**仅 admin**
+- **用户管理**：`/auth/users*` 一般由 **admin、operator、team_lead** 使用；仅有 **admin** 可指派或管理 **`admin`** 角色账号；组长为组员/**观摩**绑邮箱时，仅能选 **`rbac_lead_can_assign_mailbox`**（本小组已挂载）的邮箱。
+
+前端用 CSS 隐藏无权限按钮，**仍以 API 返回值为准**。仪表盘 **「权限对比表」与角色说明**已与上述一致（含观摩可选绑定说明）。
+
+变更配置或模型后请 **重启 `python -m app.main`** 使之生效。
 
 ---
 
@@ -90,12 +117,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 │   ├── agent.py              # 来信处理核心：收信→分析情绪→升级判断→发回复→写升级记录（含分段耗时日志）
 │   ├── config.py             # 环境变量统一读取（含客服配置项；字符串 trim）
 │   ├── thread_scope.py       # 线程 ID 作用域：mailbox_id + RFC 线索，避免多收件箱键冲突
-│   ├── escalation_settings.py # 全局兜底收件人：DB 覆盖层 + effective 取值
+│   ├── escalation_settings.py # 仪表盘「兜底」配置读写 + effective 展示（内部升级路由不读取）
 │   ├── database.py           # SQLite 持久化层
-│   ├── llm_service.py        # LLM 调用：情绪分析 + 回复生成 + 升级摘要
+│   ├── llm_service.py        # LLM：情绪 JSON 容错、安抚/普通回复、升级摘要、对来信与客服草稿的中文参考译文（含沙箱）
 │   ├── mail_service.py       # IMAP 收件 + SMTP 发件（用户回复 & 内部升级通知）
 │   ├── auth_service.py       # 登录、bootstrap、密码与会话
 │   ├── auth_deps.py          # FastAPI Depends：当前用户与角色
+│   ├── rbac_scope.py         # 邮箱级 scope：mailbox_scope / ensure_mailbox_in_scope / 仪表盘汇总过滤
 │   ├── main.py               # FastAPI 入口 + 仪表盘路由
 │   ├── graphs/
 │   │   └── inbound_graph.py  # LangGraph 客服状态机（5 节点）
@@ -131,9 +159,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `intent_results` | 每封来信的情绪识别结果（cs_sentiment / cs_tone / escalated） |
 | `escalation_events` | 升级事件记录：通知发送至、升级原因、时间戳 |
 | `processed_messages` | 已处理邮件去重记录 |
-| `support_escalation_settings` | 单行：仪表盘覆盖的全局 BACKUP / DEFAULT 收件人（邮箱为空则该字段仍用 .env） |
-| `users` | 仪表盘登录账号：用户名、`password_hash`、角色 `admin`/`operator`/`viewer`、是否启用 |
+| `support_escalation_settings` | 单行：仪表盘可保存的「兜底」邮箱/称呼（表结构含历史 `backup_*` 字段）；**内部升级通知不读取**，仅 API/展示兼容 |
+| `users` | 仪表盘登录：`username`、`password_hash`、角色 **`admin` / `operator` / `viewer` / `team_lead` / `team_member`**、是否启用 |
 | `user_sessions` | 服务端会话：随机 token、用户 FK、过期时间；登出或过期后失效 |
+| `teams` | 小组：名称、`lead_user_id`（组长用户 FK） |
+| `team_mailboxes` | **小组 ↔ 管辖邮箱**：某小组可处理哪些 `mailboxes`（组长数据范围据此计算） |
+| `user_mailboxes` | **用户 ↔ 负责/只读邮箱**：组员必选绑定；观摩可选绑定（未绑则全租户只读）；同一 `mailbox_id` 全局至多一条 |
+| `mock_conversation_memory` | **流程沙箱可选记忆**：按 `user_id + mailbox_id + slot` 存 JSON 轮次，与真实线程数据隔离 |
 | `campaigns` / `outreach_messages` / `tickets` | 保留表结构（历史数据兼容），不再写入新数据 |
 
 ### `escalation_events` — 升级事件
@@ -145,7 +177,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | creator_id | INTEGER | 关联联系人 |
 | product_id | TEXT | 关联产品 |
 | reason | TEXT | 升级触发原因（LLM 推荐 / 关键词 / 二次不满意） |
-| internal_email_to | TEXT | 内部升级通知发送至（产品 owner 或全局默认） |
+| internal_email_to | TEXT | 内部升级通知发送至（产品 owner 或 `fallback_owner_email`） |
 | sent_at | TEXT | 发送时间 |
 | created_at | TEXT | 记录创建时间 |
 
@@ -168,24 +200,23 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 2. 通过仪表盘「产品库」Tab 的表单更新（`POST /products`）。负责人可从「**内部客服**」页维护的名单（`support_staff`）下拉选择，也可选「其他」手动填写内部邮箱
 3. 直接修改 SQLite 数据库中 `products` 表的 `owner_email` 字段
 
-**独立站邮箱 ↔ 产品（多对多）**：在「产品库」勾选「独立站邮箱」后保存，会写入 `mailbox_products`。系统对某封来信的**关键词自动绑品**只在「当前收件邮箱所关联的产品集合」内匹配，**不会**扫全库；未勾选任何邮箱的产品不参与任何邮箱的关键词匹配。请求体带 `mailbox_ids` 时会**覆盖**该产品的全部邮箱关联；不带该字段则**不改**现有关联（兼容旧客户端）。
+**独立站邮箱 ↔ 产品（多对多）**：在「产品库」表单中勾选「独立站邮箱」复选框后保存，会写入 `mailbox_products`。系统对某封来信的**关键词自动绑品**只在「当前收件邮箱所关联的产品集合」内匹配，**不会**扫全库；未勾选任何邮箱的产品不参与任何邮箱的关键词匹配。请求体带 `mailbox_ids` 时会**覆盖**该产品的全部邮箱关联；不带该字段则**不改动**现有关联（兼容旧客户端）。
 
 **产品库界面**：
 
-- **按邮箱看产品**：列表上方有「**全部产品** / **各邮箱**」**下划线切换**（选中状态存入浏览器 `sessionStorage`，刷新可保留）。点某一邮箱后，表格**只显示**已关联到该邮箱的产品（按站管理，来信关键词只在这些产品里匹配）；点「全部产品」时多一列 **「邮箱账户」** 摘要。
+- **按邮箱看产品**：列表上方有「**全部产品** / **各邮箱**」**下划线切换**（选中状态存入浏览器 `sessionStorage`，刷新可保留）。点某一邮箱后，表格**只显示**已关联到该邮箱的产品；点「全部产品」时多一列 **「邮箱账户」** 摘要。**注意**：标签仅影响列表过滤；保存产品时 **`mailbox_ids` 只以表单内复选框为准**，不会自动并入当前选中的邮箱标签。
 - **放大镜 · 筛选邮箱标签**：邮箱标签行右侧有搜索按钮，展开后按 **名称 / 邮箱 / ID** 过滤**标签按钮**（「全部产品」与**当前已选邮箱**的标签不会被筛掉，避免找不到选中项）。
 - **放大镜 · 产品表单里的独立站邮箱**：勾选多选列表旁可展开搜索，按关键词**显示/隐藏**各行复选框，便于几十个邮箱时快速勾选。
-- **保存**：在某一邮箱视图下保存产品时，会自动把**当前视图邮箱**并入 `mailbox_ids`（与已勾选项合并去重）。
+- **删除**：在「全部产品」视图下「删除」为**删除整条产品**及所有邮箱关联；在某一**邮箱**视图下「删除」仅为**解除该产品与当前邮箱的关联**（`DELETE /products/{id}/mailboxes/{mailbox_id}`，产品主记录与其它邮箱关联保留）。
 
 **客户会话界面**：
 
 - **当前邮箱**下拉旁有 **放大镜**：展开后按关键词**筛选下拉中的邮箱选项**（「全部」保留；若当前选中项被筛掉，仍会出现在列表中以免丢失选择）。
+- **一键确认人工处理完**：与「清空全部会话」并列；对当前所选邮箱（或「全部」时在账号可见范围内）下尚未人工结案的会话批量标记（`POST /threads/bulk-manual-handoff`）。
 
 **内部名单**：在「内部客服」页添加/删除人员会调用 `POST /support-staff`、`DELETE /support-staff/{id}`，与产品表单中的负责人下拉实时一致。
 
-一般（非 hostile 的安抚类、及非安抚类升级）收件人优先级：`product.owner_email` → `product.fallback_owner_email` → **BACKUP** → **DEFAULT**。
-
-**例外**：安抚类且 **tone = hostile** 时，内部通知**先**发 **BACKUP**（无则仍按上列链），便于集中处理高冲突工单。
+内部升级通知收件人（**仅产品侧**，与 `tone` 无关）：`product.owner_email` → `product.fallback_owner_email`；两者皆空则**不发**内部通知。
 
 **不提供**：线程级别的负责人切换 UI、`/products/{id}/owner` 独立 API、邮件密语绑定。
 
@@ -214,15 +245,20 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 | 标签页 | 内容 |
 |---|---|
-| **客户会话** | 会话列表 + 最近情绪预览。**当前邮箱**：下拉筛选本会话列表来自哪一台收件箱；旁侧 **放大镜** 可按关键词筛下拉选项（名称/邮箱/ID）。 |
+| **客户会话** | 会话列表 + 最近情绪预览（生产来信落库后经 `intent_results`）。**人工结案**：单条 `PATCH /thread/{id}/manual-handoff`；**一键确认人工处理完**：`POST /threads/bulk-manual-handoff`（范围与当前邮箱筛选一致）。标记后会话仅归档来信、**不走自动分析与回复**。**当前邮箱**：下拉筛选；旁侧 **放大镜** 可按关键词筛选项（名称/邮箱/ID）。 |
 | **内部通知** | 已发给产品/备用的内部说明邮件留痕：客户、产品、事由、通知发送至 |
-| **客诉分析** | 每封来信的 sentiment / tone / 是否已转内部 |
-| **产品库** | 产品增删改（1A）。**按邮箱下划线切换**仅看该站关联产品；**放大镜**可搜邮箱标签 / 搜表单里的多选邮箱。**在某一邮箱视图下保存**会自动带上该邮箱到 `mailbox_ids` |
-| **内部客服** | **同一页**包含：① **可分配负责人名单**（姓名、内部企业邮箱，对应 `support_staff`）；② **全局兜底收件人**（与 `GET/PUT /settings/escalation` 一致）。编辑区为 **一行两列**：「兜底 · 邮箱 | 兜底 · 称呼」，少占纵向空间 |
-| **邮箱账户** | 多台站点邮箱：分别填写 IMAP/SMTP；仪表盘含阿里云企业邮、Gmail、Outlook/Hotmail、Microsoft 365、Yahoo、网易 163 等一键模板。**「测试」**：依次验证 **IMAP**（登录并预览最多 1 封未读，可无未读）与 **SMTP**（与同账号真实发信相同的 TLS/登录流程，**仅 AUTH，不投递邮件**）。对外客服回复与内部升级通知共用该邮箱的 SMTP |
-| **运行日志** | 最近 200 条运行日志（接口 `GET /logs?tail=200`），每 6 秒自动刷新 |
+| **客诉分析** | **生产环境**来信的情绪识别列表（sentiment / tone / escalated）。**沙盘推演不写此库**——沙箱请在「流程沙箱」区看接口返回摘要条 |
+| **产品库** | 产品增删改（1A）。**按邮箱下划线切换**仅看该站关联产品；**放大镜**可搜邮箱标签 / 搜表单里的多选邮箱。**保存**时 `mailbox_ids` **仅**由表单复选框决定；**按邮箱视图删除**仅解除该邮箱关联。组员账号此 Tab 通常为只读或隐藏表单（见前端权限类） |
+| **内部客服** | **同一页**：① **`support_staff` 名单**；② **历史兜底配置**（`GET/PUT /settings/escalation`，**不参与**内部升级路由，详见功能表） |
+| **邮箱账户** | 多台收件箱：**新增/编辑/删除/连通性测试** 需要 **专员或组长**权限；**组长/组员**在「已配置账户」表中可使用 **暂停/开启该邮箱自动拉信**（`PUT /mailboxes/{id}/poll`，仅权限内邮箱；**不改变**全局后台轮询进程启停——全局仍只有 admin/operator 可点顶部「启动/停止轮询」）。组员不显示整张「新增/编辑邮箱」表单 |
+| **流程沙箱** | `POST /mock/inbound`：与生产同源 LangGraph/**不落真实会话/SMTP**；顶部 **对话时间线**，下方可展开复制英文与中文参考译文。安抚英文回复使用较高 `max_tokens` 以降低截断；译文路径对「草稿未写完」类输入更容错。可选 **`mock_conversation_memory`** 槽与 **`GET/DELETE /mock/memory`** |
+| **账号管理** | **超级管理员 / 专员 / 组长**可见：用户 CRUD、`user_mailboxes` 绑定（组员 + 可选观摩）。仅超级管理员可设 **`admin`** 角色及「高危批量清空」等 |
+| **小组与邮箱** | **仅超级管理员**：小组 CRUD、为小组挂载 **管辖邮箱池**（`team_mailboxes`）；组长在无管辖邮箱时下拉列表为空，无法收窄数据 |
+| **运行日志** | 最近 200 条（`GET /logs?tail=200`）；**观摩账号**不自动轮询加载该 Tab（减噪） |
 
-进程启动后**默认不自动开启**收件轮询（`AUTO_START_POLLING` 默认为 `false`）；需在仪表盘点击「启动轮询」或调用 `POST /start-auto`。设为 `true` 则启动进程后即按间隔后台轮询；停止请点「停止轮询」或结束进程。详见 **[运行日志与耗时](#运行日志与耗时)**；若 `LLM_API_KEY` 为空，`call_llm` 会抛出明确错误。
+**轮询两件事**：① **全局后台** `POST /start-auto`：`run_check_cycle` 是否周期性执行（**admin + operator**）。② **`mailboxes.poll_enabled`**：某邮箱是否在轮询轮到它时参与 IMAP 拉取——**组员/组长**通常只应有权改这一项以「关闭自己邮箱」，无需停整机。
+
+进程启动后**默认不自动开启全局轮询**（`AUTO_START_POLLING` 默认为 `false`）；需在仪表盘顶部点击「启动轮询」或 `POST /start-auto`。设为 `true` 则进程启动后即按间隔跑 `run_check_cycle`。详见 **[运行日志与耗时](#运行日志与耗时)**；若 `LLM_API_KEY` 为空，`call_llm` 会抛出明确错误。
 
 **说明**：已不再提供「来函客户」类手工客户表维护；`creators` 仅由收信流程按需写入，用于会话与升级展示关联。
 
@@ -247,14 +283,15 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `POST /start-auto` | 启动后台定时轮询；若已在运行则返回 `already_running` |
 | `POST /stop-auto` | 停止后台轮询（停止后需再次调用 `/start-auto` 才会恢复） |
 | `GET /status` | 服务状态（含 `auto_polling`、`auto_start_polling_default`、`poll_interval_seconds`、汇总数据等） |
-| `GET /settings/escalation` | 全局 DEFAULT：数据库覆盖值、生效值、.env 对照（body 与仪表盘表单项一一对应） |
-| `PUT /settings/escalation` | 保存全局收件至数据库（`default_owner_email` / `default_owner_name`；空字符串表示清除该字段覆盖并回退 .env） |
+| `GET /settings/escalation` | 兜底配置：数据库值、effective 展示、.env 对照（**内部升级路由不使用**） |
+| `PUT /settings/escalation` | 保存兜底字段至数据库（`default_owner_email` / `default_owner_name`；空字符串清除覆盖并回退 .env） |
 | `GET /products` | 产品列表（含 owner、**`mailbox_ids`** 等；与 `mailbox_products` 关联一致） |
 | `GET /support-staff` | 内部可分配人员列表（产品负责人下拉数据源） |
 | `POST /support-staff` | 添加人员（body: `display_name`, `email`） |
 | `DELETE /support-staff/{id}` | 删除人员记录 |
 | `POST /products` | 新增/更新产品（owner 维护入口）。可选 **`mailbox_ids`**（整数数组）：传入则**覆盖**该产品全部邮箱关联；不传则**不改动**现有关联 |
-| `DELETE /products/{id}` | 删除产品 |
+| `DELETE /products/{id}` | 删除产品及全部邮箱关联 |
+| `DELETE /products/{id}/mailboxes/{mailbox_id}` | 仅解除该产品与指定邮箱关联（不删产品主记录） |
 | `GET /intents` | 情绪识别结果列表（含 cs_sentiment / cs_tone / escalated） |
 | `DELETE /intents/{intent_id}` | 删除单条情绪识别记录 |
 | `DELETE /intents` | 清空全部情绪识别记录 |
@@ -263,6 +300,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `DELETE /escalations` | 清空全部内部通知留痕 |
 | `GET /kols` | 客户会话概览；可选查询参数 **`mailbox_id`** 仅看该收件箱 |
 | `GET /thread/{thread_id}` | 单一会话完整对话历史 |
+| `PATCH /thread/{thread_id}/manual-handoff` | 人工结案：`body.manual_handoff_completed` 布尔；**组长/组员/admin/operator**，且线程须在本人邮箱范围内 |
+| `POST /threads/bulk-manual-handoff` | 批量结案：`body.mailbox_id` 可选，与 `GET /kols` 筛选一致；将范围内 `manual_handoff_completed=0` 的线程标记为已结案 |
 | `DELETE /thread/{thread_id}` | 删除该会话数据 |
 | `DELETE /threads` | 清空全部会话数据 |
 | `GET /processed` | 已处理邮件去重记录列表（调试/运维） |
@@ -273,9 +312,31 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `GET /emails` | 预览当前未读邮件（不触发处理） |
 | `GET /mailboxes` | 邮箱账户列表 |
 | `POST /mailboxes` | 新增邮箱账户 |
-| `PUT /mailboxes/{mailbox_id}` | 更新邮箱账户 |
-| `DELETE /mailboxes/{mailbox_id}` | 删除邮箱账户 |
-| `POST /mailboxes/{mailbox_id}/test` | 连通性测试：**IMAP** + **SMTP 登录**（不发信）。响应含 `status`: `ok` / `partial` / `failed`，以及 `imap` / `smtp` 分项与兼容字段 `peek_count` |
+| `PUT /mailboxes/{mailbox_id}` | 更新邮箱账户。**组长仅能更新本小组管辖范围内的邮箱 ID** |
+| `DELETE /mailboxes/{mailbox_id}` | 删除邮箱账户。**组长同上** |
+| `POST /mailboxes/{mailbox_id}/test` | 连通性测试：**IMAP** + **SMTP 登录**（不发信）。组长仅能测 **本组管辖邮箱** |
+| `PUT /mailboxes/{mailbox_id}/poll` | 单邮箱 **`poll_enabled`** 开关（是否参与自动拉未读）。**不改变**全局 `start-auto/stop-auto` |
+
+### 登录与账号（节选）
+
+| 端点 | 说明 |
+|---|---|
+| `POST /auth/login`、`POST /auth/logout` | Cookie 会话 |
+| `GET /auth/me` | 当前用户；`mailbox_ids` 为组员收窄范围 **或** 观摩收窄范围（若无绑定则无此项） |
+| `GET /auth/users`、`POST /auth/users`、`PATCH /auth/users/{id}`、`DELETE /auth/users/{id}`、`PUT /auth/users/{id}/mailboxes` | 权限见上文 RBAC |
+
+### 小组（仅管理员）
+
+| 端点 | 说明 |
+|---|---|
+| `GET/POST/PATCH/DELETE /teams`、`PUT /teams/{id}/mailboxes` | 小组与 **管辖邮箱池** |
+
+### 流程沙箱
+
+| 端点 | 说明 |
+|---|---|
+| `POST /mock/inbound` | 模拟一封来信：**dry_run**，响应含 `sentiment`、`tone`、`suggested_reply`、`suggested_reply_zh`、`internal_ticket_preview`、`dry_run:true`；**不写**真实 `thread`/SMTP/`intent_results` |
+| `GET /mock/memory`、`DELETE /mock/memory` | 可选沙箱会话记忆：`mailbox_id`、`slot`、`user_id` 联合主键 |
 
 ---
 
@@ -297,8 +358,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `BRAND_NAME` | Our Brand | 品牌名（注入 LLM prompt） |
 | `BRAND_SIGNATURE` | Support Team | 邮件署名 |
 | `HOST` / `PORT` | 0.0.0.0 / 8000 | HTTP 服务监听地址与端口 |
-| `DEFAULT_SUPPORT_OWNER_EMAIL` | — | **最后一级兜底**：产品无负责人或未匹配到产品时的升级通知收件人 |
-| `DEFAULT_SUPPORT_OWNER_NAME` | Support Owner | 全局默认负责人姓名 |
+| `DEFAULT_SUPPORT_OWNER_EMAIL` | — | **遗留**：`GET /settings/escalation` 与仪表盘展示仍可读；**内部升级通知不读取**，无负责人时不发内部邮件 |
+| `DEFAULT_SUPPORT_OWNER_NAME` | Support Owner | 同上（展示/兼容） |
 | `AUTO_REPLY_ON_ESCALATION` | true | **预留**，当前未接入业务逻辑；对外话术由安抚流 `after_sales_notified` 与提示词控制 |
 | `ALLOW_COMPENSATION_PROMISES` | false | 是否允许 LLM 在回复中承诺具体赔偿 |
 | `REPEAT_DISSATISFACTION_HOURS` | 24 | 判断「二次不满意强制升级」的时间窗（小时） |
@@ -341,6 +402,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 - **SMTP/MIME**：`mail_service.py` 中对外回复使用与阿里云邮箱网页投递相近的多部分结构与会话头（`In-Reply-To` / `References` 等），便于与手工网页回信保持一致、降低误判风险；域名 SPF/DKIM 等仍以邮箱服务商与 DNS 配置为准。
 - **发信主机与收信主机分离**：例如阿里云企业邮 **IMAP** 为 `imap.qiye.aliyun.com`，**SMTP** 须填 **`smtp.qiye.aliyun.com`**（勿把 IMAP 主机填进 SMTP）。端口常见为 **465 + SMTP SSL**，或 **587 + 关闭 SSL 隐含连接**（`STARTTLS`，与仪表盘勾选一致）。填错易出现「测试/发信失败、收信仍正常」。
 - **SQLite 并行写**：数据库连接已启用 **WAL** 与 **busy_timeout**，多会话并行处理时可降低锁冲突。工作目录下可能出现 `-wal` / `-shm` 文件，属正常现象。
+- **LLM JSON 契约**：仪表盘沙箱等对模型返回 **结构化 JSON** 的路径（例如情绪字段）已实现 **截取首个 `{…}`、`raw_decode` 容错**与中英文枚举归一；长英文回信译为中文时具备多级兜底，并提示模型处理「未写完」的草稿片段。**仍建议**在生产环境选对模型并做好 `.env`/重启。
 - **Windows 与 TLS**：若 `SMTP_SSL` 握手报 `FileNotFoundError` 等证书路径错误，可检查环境变量 `SSL_CERT_FILE` / `SSL_CERT_DIR` 是否指向不存在路径；`imap_tools` 与 `smtplib` 的 TLS 路径不完全相同，可能出现仅 IMAP 通过、SMTP 失败。
 - **配置容错**：`PORT`、各超时/轮询/截断等数字型环境变量若填写非数字，将自动回退为内置默认值，避免进程无法启动。
 - **纯被动入站**：系统只响应收到的来信，不发送任何主动外呼邮件。

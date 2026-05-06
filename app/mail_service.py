@@ -303,7 +303,7 @@ def send_internal_escalation(
     正文结构：前半为简短推送标签 + LLM 摘要 + 极简索引行；后半为来信原文与中文译文，末尾一行跟进提示。
 
     Args:
-        to_email:              收件人邮箱（产品 owner_email 或 DEFAULT_SUPPORT_OWNER_EMAIL）
+        to_email:              收件人邮箱（产品 owner_email 或 fallback_owner_email）
         to_name:               收件人姓名
         thread_id:             会话 ID（邮件线程 key，排障用）
         contact_name:          触发升级的联系人姓名（用于主题行）
